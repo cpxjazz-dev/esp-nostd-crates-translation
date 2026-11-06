@@ -1,0 +1,2066 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32-C3 Rust no_std 常用 crate 文档翻译（v2）</title>
+<style>
+body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+max-width:860px;margin:0 auto;padding:24px 20px 64px;line-height:1.75;color:#1f2937}
+h1{font-size:1.6em;border-bottom:2px solid #e5e7eb;padding-bottom:.4em}
+h2{font-size:1.3em;margin-top:1.8em;border-bottom:1px solid #e5e7eb;padding-bottom:.3em}
+h3{font-size:1.15em;margin-top:1.5em}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+font-size:.88em;background:#f3f4f6;padding:.1em .3em;border-radius:4px}
+pre{background:#111827;color:#f9fafb;padding:14px 16px;border-radius:8px;overflow-x:auto}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d1d5db;padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#f9fafb}
+blockquote{border-left:4px solid #3b82f6;background:#eff6ff;margin:1em 0;padding:.6em 1em}
+a{color:#2563eb}
+.note{font-size:.9em;color:#6b7280;border:1px dashed #d1d5db;border-radius:8px;padding:10px 14px;margin-bottom:1.5em}
+</style>
+</head>
+<body>
+<div class="note">这是 <code>esp-nostd-crates-translation.md</code> 的 HTML 版，内容完全一致（v2，2026-11-05 生成，C3 专属查阅版）。
+crate 名、函数名、代码与 Cargo.toml 保持原文；版本号落项目前请到 crates.io 核对。
+Obsidian 版见同目录的 <code>esp-nostd-crates-translation-obsidian.md</code>。</div>
+<h1 id="esp32-c3-rust-no_std-crate-v2-c3">ESP32-C3 Rust <code>no_std</code> 常用 crate 文档翻译（v2 · C3 专属查阅版）</h1>
+<blockquote>
+<p>整理时间：2026 年 11 月 5 日（v2 扩充版）
+面向读者：已经会写 Rust、正在学 ESP32-C3 + Rust <code>no_std</code> 的开发者
+本文不是官方翻译。原文以 crates.io / docs.rs / 《Rust on ESP Book》为准，
+版本号变化很快，落到自己项目前请先到 crates.io 核对最新版再固定版本。</p>
+</blockquote>
+<h2 id="v2-v1">v2 改了什么（相对 v1）</h2>
+<p>v1 只讲了 8 个 crate 的“是什么”，三个缺口这次补上：</p>
+<ol>
+<li><strong>API 表</strong>：每个 C3 外设 / 每个 crate 给出模块路径、主类型、关键方法名，
+   能直接按表查，不用再翻英文原文找入口。</li>
+<li><strong>示例索引</strong>：只列已核实文件名的官方示例，每个一句话说明它演示什么，
+   没核实文件名的不编造，教你用 <code>//% CHIPS:</code> 行和 <code>Cargo.toml</code> 自己判定。</li>
+<li><strong>异步专章</strong>：<code>esp-rtos</code> 启动、<code>#[esp_rtos::main]</code>、Embassy 任务、
+   <code>Timer</code> / <code>Channel</code> / <code>Mutex</code> / <code>select</code>、Wi-Fi + <code>embassy-net</code> 的
+   完整异步链路，不再只有一句“配合 Embassy 使用”。</li>
+</ol>
+<p>同时 v2 <strong>只留 C3 有关的部分</strong>：删掉了 v1 里按 C6 写的示例参数
+（例如 <code>esp-storage</code> 示例里的 <code>esp32c6</code>），删掉了 C3 上不存在的外设
+（DAC、Ethernet、USB-OTG、PSRAM 等），并纠正了 v1 遗留的两处错误：
+<code>esp-nvs</code> 的真实 API 不是 <code>NvsPartition::new</code> / <code>get_i32</code> / <code>commit</code>
+（那是 ESP-IDF C API 和 <code>esp-idf-svc</code> 的写法），默认 NVS 分区也不是
+示例里的 <code>0x390000 / 0x32000</code>（见第 7 节）。</p>
+<h2 id="_1">版本警告：先对版本，再抄代码</h2>
+<p>2026 年 11 月核查时看到的版本线：<code>esp-hal</code> 1.2.2、<code>esp-radio</code> 1.0.0-beta.1、
+<code>esp-rtos</code> 0.3.0、<code>esp-nvs</code> 0.5.0、<code>esp-println</code> 0.18.0、<code>esp-alloc</code> 0.9.0、
+<code>esp-storage</code> 0.8.x。<strong><code>esp-radio</code> 0.17 → 0.18 改了 Wi-Fi API，
+<code>esp-hal</code> 1.x 各小版本的外设稳定性也在变</strong>，不同版本同一个东西可能
+叫两个名字，例如：</p>
+<ul>
+<li>Wi-Fi 接口：旧版 <code>interfaces.sta</code> / <code>WifiDevice</code>，新版 <code>interfaces.station</code> / <code>Interface</code></li>
+<li>Wi-Fi 模式：旧版 <code>ModeConfig::Client</code> / <code>ModeConfig::AccessPoint</code>，
+  新版 <code>Config::Station</code> / <code>Config::AccessPoint</code></li>
+<li><code>esp_rtos::start</code>：旧版单参数 <code>start(timg0.timer0)</code>，当前 C3 实例一律双参数
+  <code>start(timg0.timer0, sw_int.software_interrupt0)</code></li>
+</ul>
+<p><strong>规则：成套升级，不要只升一个 crate；抄代码前先确认你锁定的版本文档。
+本文凡是写“版本不同，两个名字”的地方，都是这个原因。</strong></p>
+<h2 id="_2">翻译原则：哪些翻，哪些不翻</h2>
+<table>
+<thead>
+<tr>
+<th>内容</th>
+<th>处理方式</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>说明性文字、用途、注意事项、步骤</td>
+<td>翻译成中文</td>
+<td>这是本文的主要价值</td>
+</tr>
+<tr>
+<td>crate 名、函数名、类型名、宏名、Cargo feature 名</td>
+<td>保持原文，例如 <code>esp_hal::init</code>、<code>heap_allocator!</code>、<code>esp32c3</code></td>
+<td>改了就编不过，查文档也对不上</td>
+</tr>
+<tr>
+<td><code>Cargo.toml</code>、代码片段、命令行</td>
+<td>保持原文，只在代码外用中文注释</td>
+<td>直接可用</td>
+</tr>
+<tr>
+<td>错误信息、日志输出、专有名词</td>
+<td>保持原文，例如 <code>Out of capacity</code>、<code>backtrace</code>、<code>PSRAM</code></td>
+<td>搜索和排错时用原文最有效</td>
+</tr>
+<tr>
+<td>每个 API 的完整参数表</td>
+<td>只翻译“怎么选、怎么用”，给关键方法表；完整签名以 docs.rs 为准</td>
+<td>docs.rs 的 API 文档是按芯片生成的，量太大且随版本变</td>
+</tr>
+</tbody>
+</table>
+<p>一句话总结：<strong>讲清楚用中文讲，动手用原文动手。</strong></p>
+<hr />
+<h2 id="c3-api">C3 硬件快照（查 API 之前先对上这张表）</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>C3 的值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CPU</td>
+<td>单核 RISC-V，最高 160 MHz，目标 <code>riscv32imc-unknown-none-elf</code>，稳定 Rust 可用</td>
+</tr>
+<tr>
+<td>内存</td>
+<td>SRAM 400 KB，ROM 384 KB；Flash 外置，常见 4 MB，最高 16 MB</td>
+</tr>
+<tr>
+<td>PSRAM</td>
+<td><strong>没有</strong>。<code>psram_allocator!</code>、<code>psram</code> feature 都不要用在 C3 上</td>
+</tr>
+<tr>
+<td>无线</td>
+<td>Wi-Fi 4（802.11 b/g/n）+ BLE 5.0 LE，<strong>无经典蓝牙，无 IEEE 802.15.4</strong>（Zigbee / Thread 要换 C6 / H2）</td>
+</tr>
+<tr>
+<td>USB</td>
+<td>只有 USB-Serial-JTAG（固定 CDC-ACM + JTAG，占 GPIO18/19），<strong>无 USB-OTG</strong></td>
+</tr>
+<tr>
+<td>没有的外设</td>
+<td>DAC、Ethernet、触摸 Touch、摄像头、MCPWM、PCNT、ULP、SDMMC host、I3C、LP UART/I2C/SPI、SPI3、I2C1、UART2</td>
+</tr>
+<tr>
+<td>只有 1 个的</td>
+<td>SPI2（SPI0/SPI1 接 Flash）、I2C0、I2S 1 个、TWAI 1 个</td>
+</tr>
+<tr>
+<td>只有 2 个的</td>
+<td>UART0 + UART1、TIMG0 + TIMG1</td>
+</tr>
+</tbody>
+</table>
+<h3 id="c3-blink">C3 引脚坑（写 Blink / 接线之前先看）</h3>
+<ul>
+<li><strong>Flash 占 GPIO11–GPIO17，永远别用。</strong></li>
+<li><strong>Strapping 脚 GPIO2 / GPIO8 / GPIO9</strong>：复位时采样定启动模式。
+  GPIO9 拉低进下载模式（多为 BOOT 键），GPIO8 选 Flash 电压。
+  复位后可当普通 GPIO，但外接电路别在复位时把它们拉错电平。</li>
+<li><strong>USB-Serial-JTAG 占 GPIO18（D−）/ GPIO19（D+）</strong>：原生 USB-C 烧录 /
+  打印 / 调试，不用 CH340；烧录或看日志时别把这两脚当普通 GPIO。</li>
+<li><strong>UART0（GPIO20 RX / GPIO21 TX）是启动日志口</strong>，别另作他用。</li>
+<li><strong>JTAG 脚 GPIO4–GPIO7</strong>：不用外接 JTAG 时可当普通 GPIO。</li>
+<li><strong>ADC2（GPIO5）与 Wi-Fi 冲突</strong>：开 Wi-Fi 后 ADC2 读数不可靠；
+  做 Wi-Fi 传感器优先用 ADC1（GPIO0–GPIO4），其中 GPIO2 是 strapping 脚，
+  首选 GPIO0/1/3/4。</li>
+<li><strong>LED 引脚因板而异，没有统一答案</strong>：DevKitC-02 是 GPIO8 的可寻址 RGB LED；
+  SuperMini 常见 GPIO8 普通蓝色 LED（低电平亮）；XIAO 等板又不同。
+  GPIO8 当普通 <code>Output</code> 只对普通 LED 板有效，WS2812 板必须用 RMT +
+  <code>smart-leds</code> 类驱动，先看板子丝印 / 原理图再写 Blink。</li>
+<li><strong>GPIO 全是 3.3 V，不耐 5 V</strong>：5 V 信号要分压 / 电平转换。</li>
+<li>I2C / SPI / UART 多数可经 GPIO 矩阵任意改脚，但 ADC、USB、JTAG、
+  Flash-SPI 是固定脚。</li>
+</ul>
+<hr />
+<h2 id="crate">生态总览（先建立全图，再看单个 crate）</h2>
+<p>原文（《Rust on ESP Book · Ancillary Crates Overview》）：</p>
+<blockquote>
+<p>The core crate that ties all work with Espressif chips in Rust is the <code>esp-hal</code> crate.
+Through it, you will be able to perform basic initialization of the chip,
+as well as access drivers for the peripherals available on the chip.</p>
+</blockquote>
+<p>中文：把所有 Espressif 芯片上的 Rust 工作串起来的核心 crate 是 <code>esp-hal</code>。
+通过它可以完成芯片的基本初始化，并访问芯片上各个外设的驱动。</p>
+<p>原文：</p>
+<blockquote>
+<p>Furthermore, you may want to use more advanced functionality of the chip.
+For example, network and connectivity. This part of the ecosystem is the
+responsibility of <code>esp-radio</code>.</p>
+</blockquote>
+<p>中文：如果你还需要更高级的功能，例如网络和连接，这部分由 <code>esp-radio</code> 负责。
+它把各芯片上可用的通信协议驱动合在一起：Wi-Fi、BLE、ESP-NOW，
+以及底层的 IEEE 802.15.4（<strong>C3 没有 802.15.4 射频，这一项与 C3 无关</strong>）。</p>
+<p>原文：</p>
+<blockquote>
+<p>For more advanced work with chip memory and to use collections from the <code>alloc</code>
+crate in <code>no_std</code> that require heap allocation, you are welcome to use <code>esp-alloc</code>.</p>
+</blockquote>
+<p>中文：如果你要更深入地使用芯片内存，或者在 <code>no_std</code> 下使用 <code>alloc</code> 里
+需要堆分配的集合（例如 <code>Vec</code>、<code>Box</code>、<code>String</code>），请使用 <code>esp-alloc</code>。</p>
+<p>分工速查：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>crate</th>
+<th>一句话</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>硬件抽象</td>
+<td><code>esp-hal</code></td>
+<td>裸机 HAL，外设驱动的入口</td>
+</tr>
+<tr>
+<td>堆内存</td>
+<td><code>esp-alloc</code></td>
+<td><code>no_std</code> 下的全局堆分配器</td>
+</tr>
+<tr>
+<td>出错时怎么办</td>
+<td><code>esp-backtrace</code></td>
+<td>panic / 异常时打印调用栈</td>
+</tr>
+<tr>
+<td>打印和日志</td>
+<td><code>esp-println</code></td>
+<td><code>println!</code>、<code>log</code> 的串口后端</td>
+</tr>
+<tr>
+<td>掉电不丢的数据</td>
+<td><code>esp-storage</code></td>
+<td>Flash 的底层读写，配合 NVS / 文件系统用</td>
+</tr>
+<tr>
+<td>掉电不丢的键值</td>
+<td><code>esp-nvs</code></td>
+<td>ESP-IDF 兼容的 NVS 键值存储（v1 漏掉，本版补全）</td>
+</tr>
+<tr>
+<td>无线</td>
+<td><code>esp-radio</code></td>
+<td>Wi-Fi、BLE、ESP-NOW（原 <code>esp-wifi</code> 的后继；C3 无 802.15.4）</td>
+</tr>
+<tr>
+<td>调度</td>
+<td><code>esp-rtos</code></td>
+<td>给 <code>esp-radio</code> 和 Embassy 提供调度器</td>
+</tr>
+<tr>
+<td>TCP/IP</td>
+<td><code>embassy-net</code></td>
+<td>Embassy 的 TCP/IP 栈，Wi-Fi 联网必备（v1 漏掉，本版补全）</td>
+</tr>
+<tr>
+<td>异步执行器</td>
+<td><code>embassy-executor</code> / <code>embassy-time</code> / <code>embassy-sync</code></td>
+<td>任务、定时、通道、锁（本版补全）</td>
+</tr>
+<tr>
+<td>启动描述</td>
+<td><code>esp-bootloader-esp-idf</code></td>
+<td>写入 ESP-IDF 二级 bootloader 需要的应用描述，含 OTA 支持</td>
+</tr>
+</tbody>
+</table>
+<p>注意：<code>esp-hal</code> 本身标注为 Stable（但个别外设驱动仍可能标 <code>unstable</code>），
+其余多数辅助 crate 在官方表里仍标注为 Unstable，升级时要按 SemVer 之外
+的变更预期来对待，即小版本也可能有破坏性变化。<strong><code>esp-hal</code> 1.0 的稳定集
+很小：只有 GPIO、UART、SPI master、I2C master 是稳定 API，其余几乎都在
+<code>unstable</code> feature 后面。</strong></p>
+<hr />
+<h2 id="esp32-c3">最小骨架：一个 ESP32-C3 工程长什么样</h2>
+<h3 id="_3">阻塞版骨架</h3>
+<pre><code class="language-toml"># Cargo.toml（节选，版本号请以 crates.io 最新版为准）
+[dependencies]
+esp-hal = { version = &quot;1&quot;, features = [&quot;esp32c3&quot;, &quot;unstable&quot;] }
+esp-alloc = { version = &quot;0.9&quot;, features = [&quot;esp32c3&quot;] }
+esp-backtrace = { version = &quot;0.18&quot;, features = [&quot;esp32c3&quot;, &quot;panic-handler&quot;, &quot;println&quot;] }
+esp-println = { version = &quot;0.18&quot;, features = [&quot;esp32c3&quot;, &quot;log-04&quot;] }
+esp-bootloader-esp-idf = { version = &quot;0.6&quot;, features = [&quot;esp32c3&quot;] }
+</code></pre>
+<pre><code class="language-rust">// src/main.rs（节选）
+#![no_std]
+#![no_main]
+
+use esp_backtrace as _;
+use esp_hal::{
+    clock::CpuClock,
+    gpio::{Level, Output, OutputConfig},
+    main,
+    time::{Duration, Instant},
+};
+use esp_println::println;
+
+esp_bootloader_esp_idf::esp_app_desc!();
+
+#[main]
+fn main() -&gt; ! {
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
+
+    // GPIO8 接普通 LED 的板子才这样写；WS2812 板见上节“LED 引脚因板而异”
+    let mut led = Output::new(peripherals.GPIO8, Level::Low, OutputConfig::default());
+
+    loop {
+        led.toggle();
+        println!(&quot;blink&quot;);
+    }
+}
+</code></pre>
+<h3 id="embassy-2">异步版骨架（Embassy，见第 2 章详解）</h3>
+<pre><code class="language-toml"># 在阻塞版基础上加（版本号以 crates.io 为准）
+esp-rtos = { version = &quot;0.3&quot;, features = [&quot;embassy&quot;, &quot;esp32c3&quot;] }
+embassy-executor = &quot;0.10&quot;
+embassy-time = &quot;0.5&quot;
+</code></pre>
+<pre><code class="language-rust">#![no_std]
+#![no_main]
+
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
+use esp_hal::timer::timg::TimerGroup;
+
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -&gt; ! {
+    let peripherals = esp_hal::init(esp_hal::Config::default());
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(
+        peripherals.SW_INTERRUPT,
+    );
+    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+
+    spawner.spawn(blink_task()).unwrap();
+
+    loop {
+        Timer::after(Duration::from_secs(60)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn blink_task() {
+    loop {
+        Timer::after(Duration::from_millis(500)).await;
+    }
+}
+</code></pre>
+<p>注意：<code>#[esp_rtos::main]</code> 只包一层 executor，<strong>不会</strong>替你启动运行时，
+必须手动调 <code>esp_rtos::start(...)</code>。<code>esp_rtos::start_second_core(...)</code>
+是双核芯片专用的，<strong>C3 单核绝对不要用</strong>。</p>
+<hr />
+<h2 id="1-esp-hal-hal">1. <code>esp-hal</code> —— 裸机 HAL，所有外设的入口</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>Bare-metal (<code>no_std</code>) HAL for all Espressif ESP32 devices.</p>
+</blockquote>
+<p>中文：面向所有 Espressif ESP32 设备的裸机（<code>no_std</code>）硬件抽象层。</p>
+<h3 id="_4">翻译详解</h3>
+<p><code>esp-hal</code> 是 Espressif ESP32 系列单片机的硬件抽象层，
+提供安全、符合 Rust 习惯的 API 来控制硬件外设，让你不用操作系统、
+不用 C 的 ESP-IDF，也能直接在裸机上写固件。</p>
+<p>它同时提供两种风格的驱动：</p>
+<ul>
+<li><strong>Blocking（阻塞）</strong>：调用后等外设做完再返回，逻辑最直观，适合 Blink、
+  传感器轮询、简单控制；</li>
+<li><strong>Async（异步）</strong>：配合 Embassy 使用，等待时不占 CPU，适合 Wi-Fi、
+  多任务、需要同时等多个事件的工程。异步细节见第 2 章。</li>
+</ul>
+<p>在适用的地方，驱动还会实现 <code>embedded-hal</code> / <code>embedded-hal-async</code> 的 trait。
+这意味着很多通用驱动（例如 OLED、传感器驱动）不用为 ESP32 单独重写，
+只要它面向 <code>embedded-hal</code> 写，就能直接接在 <code>esp-hal</code> 的驱动上。
+同理，随机数外设还实现了 <code>rand_core</code> 的 trait，串口类驱动还实现了
+<code>embedded-io</code>（<code>no_std</code> 版的 <code>std::io</code> 对应物）。</p>
+<h3 id="_5">最核心的两个概念</h3>
+<p><strong>1. 芯片 feature 必须选对</strong></p>
+<p><code>esp-hal</code> 以及几乎所有辅助 crate 都要开一个芯片 feature，
+例如 <code>esp32</code>、<code>esp32c2</code>、<code>esp32c3</code>、<code>esp32c5</code>、<code>esp32c6</code>、<code>esp32h2</code>、
+<code>esp32s2</code>、<code>esp32s3</code>。同一个工程里所有 esp 系 crate 的芯片 feature
+必须一致，否则编译会报错或行为异常。</p>
+<p>注意：ESP8266 不在 <code>esp-hal</code> 的支持范围内。</p>
+<p><strong>2. 外设单例（Peripheral Singleton）</strong></p>
+<p>每个外设驱动都需要一个“外设单例”来告诉它用的是哪块硬件。
+这些单例由 HAL 初始化创建，并作为 <code>Peripherals</code> 结构体的字段
+从 <code>esp_hal::init</code> 返回：</p>
+<pre><code class="language-rust">let peripherals = esp_hal::init(esp_hal::Config::default());
+let mut i2c = I2c::new(peripherals.I2C0, /* ... */);
+</code></pre>
+<p>单例默认代表该外设的整个生命周期。如果你还想在别处复用同一个外设，
+可以用 <code>reborrow()</code> 方法借出，而不是用 <code>core::mem::forget</code> 绕过去——
+官方文档明确提醒：不要对 HAL 定义的类型使用 <code>core::mem::forget</code>。</p>
+<h3 id="_6">库作者特别注意（原文保留）</h3>
+<p>如果你写的是一个依赖 <code>esp-hal</code> 的库，而不是最终应用，官方建议这样引：</p>
+<pre><code class="language-toml">esp-hal = { version = &quot;1&quot;, default-features = false }
+</code></pre>
+<p>这样可以保证不提前启用 <code>rt</code> feature 和芯片 feature，
+由最终应用来选芯片、启用 <code>rt</code>，保证全工程只有一个入口调用 <code>init</code>。
+如果你的库依赖 <code>unstable</code> 功能，还必须启用 <code>requires-unstable</code> feature。</p>
+<hr />
+<h3 id="11-c3-apiunstable">1.1 C3 外设全表（按表查，✔️=稳定 API，⚒️=<code>unstable</code> 后可用）</h3>
+<table>
+<thead>
+<tr>
+<th>外设</th>
+<th>模块</th>
+<th>主类型 / 关键方法</th>
+<th>C3 数量 / 状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GPIO</td>
+<td><code>esp_hal::gpio</code></td>
+<td><code>Input</code>、<code>Output</code>、<code>OutputOpenDrain</code>、<code>Flex</code>、<code>Level</code>、<code>Event</code>、<code>InputConfig</code>、<code>OutputConfig</code>；<code>Output::new(peripherals.GPIOx, Level::High, OutputConfig::default())</code>；<code>set_high()</code> / <code>set_low()</code> / <code>toggle()</code>；<code>is_high()</code> / <code>is_low()</code>；<code>listen(Event)</code></td>
+<td>✔️，GPIO0–GPIO21 共 22 个</td>
+</tr>
+<tr>
+<td>SPI master</td>
+<td><code>esp_hal::spi::master</code></td>
+<td><code>Spi</code>、<code>Config</code>、<code>Mode</code>；<code>Spi::new(peripherals.SPI2, Config::default().with_frequency(Rate::from_khz(100)).with_mode(Mode::_0))</code>，再 <code>with_sck</code> / <code>with_mosi</code> / <code>with_miso</code> / <code>with_cs</code>；读写走 <code>embedded-hal</code> 的 <code>SpiBus</code>（<code>read</code> / <code>write</code> / <code>transfer</code> / <code>transfer_in_place</code>）；DMA 版 <code>SpiDma</code> / <code>SpiDmaBus</code>（<code>with_dma(dma_channel).with_buffers(rx, tx)</code>，单次上限 32736 字节）</td>
+<td>✔️，<strong>只有 SPI2 能给用户用</strong>，SPI0/SPI1 接 Flash，C3 无 SPI3</td>
+</tr>
+<tr>
+<td>I2C master</td>
+<td><code>esp_hal::i2c::master</code></td>
+<td><code>I2c</code>、<code>Config</code>；<code>I2c::new(peripherals.I2C0, config)?</code>；<code>write(addr, &amp;buf)</code> / <code>read(addr, &amp;mut buf)</code> / <code>write_read(addr, &amp;w, &amp;mut r)</code> / <code>transaction(addr, &amp;mut [Operation::…])</code></td>
+<td>✔️，<strong>只有 I2C0 一个</strong>；I2C 从机是 ⚒️</td>
+</tr>
+<tr>
+<td>UART</td>
+<td><code>esp_hal::uart</code></td>
+<td><code>Uart</code>、<code>UartRx</code>、<code>UartTx</code>、<code>Config</code>；<code>Uart::new(peripherals.UART0, Config::default())?</code>；<code>write(b"…")?</code> / <code>read(&amp;mut buf)?</code> / <code>flush()?</code></td>
+<td>✔️，UART0 + UART1 共 2 个</td>
+</tr>
+<tr>
+<td>ADC</td>
+<td><code>esp_hal::analog::adc</code></td>
+<td><code>Adc</code>、<code>AdcConfig</code>、<code>AdcPin</code>、<code>Attenuation</code>；<code>AdcConfig::new()</code> → <code>enable_pin(pin, Attenuation::_11dB)</code> → <code>Adc::new(peripherals.ADC1, config)</code> → <code>nb::block!(adc.read_oneshot(&amp;mut pin))?</code>；另有 <code>AdcCalBasic</code> / <code>AdcCalLine</code>（C3 可用）</td>
+<td>⚒️，2 个 12-bit SAR ADC，共 6 通道：ADC1 = GPIO0–GPIO4，ADC2 = GPIO5（仅 1 通道）</td>
+</tr>
+<tr>
+<td>LEDC（PWM）</td>
+<td><code>esp_hal::ledc</code></td>
+<td><code>Ledc</code>、<code>timer::{…}</code>、<code>channel::{…}</code>；<code>Ledc::new(peripherals.LEDC)</code> → <code>ledc.timer::&lt;LowSpeed&gt;(timer::Number::Timer0).configure(timer::config::Config { duty: Duty::Duty5Bit, clock_source: LSClockSource::APBClk, frequency: Rate::from_khz(24) })</code> → <code>ledc.channel(channel::Number::Channel0, led).configure(channel::config::Config { timer, duty_pct: 10, pin_config: PinConfig::PushPull })</code>；<code>set_duty(duty_pct: u8)</code>、<code>start_duty_fade(0, 100, 1000)</code>、<code>is_duty_fade_running()</code></td>
+<td>⚒️，6 通道，<strong>C3 只有 LowSpeed</strong>；HighSpeed 仅 ESP32</td>
+</tr>
+<tr>
+<td>RMT</td>
+<td><code>esp_hal::rmt</code></td>
+<td>模块存在，<code>Rmt</code> 等；具体 Tx/Rx 通道类型名本次未核实，查 docs.rs 为准</td>
+<td>⚒️，4 通道（2 TX + 2 RX），常用于 WS2812</td>
+</tr>
+<tr>
+<td>I2S</td>
+<td><code>esp_hal::i2s</code></td>
+<td>模块存在；具体类型 / 方法未核实，查 docs.rs 为准</td>
+<td>⚒️，1 个</td>
+</tr>
+<tr>
+<td>TWAI（CAN）</td>
+<td><code>esp_hal::twai</code></td>
+<td>模块存在；具体类型 / 方法未核实，查 docs.rs 为准</td>
+<td>⚒️，1 个，兼容 CAN 2.0，<strong>需外接 transceiver，不能直连 CAN 总线</strong></td>
+</tr>
+<tr>
+<td>Timer / SYSTIMER</td>
+<td><code>esp_hal::timer::{OneShotTimer, PeriodicTimer, timg::TimerGroup, systimer::SystemTimer}</code></td>
+<td><code>TimerGroup::new(peripherals.TIMG0)</code> → <code>timg0.timer0</code> / <code>timer1</code>；<code>OneShotTimer::new(timg0.timer0)</code>，<code>delay_millis</code> / <code>delay_micros</code> / <code>delay_nanos</code>；<code>PeriodicTimer</code> 用 <code>nb::block!(periodic.wait())</code>；<code>SystemTimer::new(peripherals.SYSTIMER)</code>（<code>alarm0…</code>，旧版作 Embassy 时间驱动）</td>
+<td>⚒️，TIMG0 + TIMG1（各 54-bit），SYSTIMER 3 个 alarm</td>
+</tr>
+<tr>
+<td>DMA</td>
+<td><code>esp_hal::dma</code></td>
+<td><code>DmaRxBuf</code> / <code>DmaTxBuf</code>，<code>dma_buffers!</code> / <code>dma_tx_buffer!</code> / <code>dma_rx_stream_buffer!</code> 等宏；<code>Mem2Mem</code>（<code>into_async()</code>）</td>
+<td>⚒️，GDMA 3 TX + 3 RX 通道；带 DMA 的外设：SPI2、UHCI0、I2S、AES、SHA、ADC</td>
+</tr>
+<tr>
+<td>RNG</td>
+<td><code>esp_hal::rng</code></td>
+<td>模块存在；构造函数 / 确切类型名未核实，查 docs.rs 为准</td>
+<td>矩阵 API ✔️、C3 实现 ⚒️</td>
+</tr>
+<tr>
+<td>AES / SHA / RSA / HMAC</td>
+<td><code>esp_hal::aes</code> / <code>sha</code> / <code>rsa</code> / <code>hmac</code></td>
+<td>模块均存在；加密 / 摘要的具体方法名未核实，查 docs.rs 为准；AES / SHA 支持 DMA</td>
+<td>⚒️；注意：<strong>ECC 在 C3 栏为 —，RSA / ECDSA 数字签名在 C3 栏为 ❌，不要在 C3 上用</strong></td>
+</tr>
+<tr>
+<td>USB-Serial-JTAG</td>
+<td><code>esp_hal::usb_serial_jtag</code></td>
+<td><code>UsbSerialJtag</code>、<code>UsbSerialJtagRx</code>、<code>UsbSerialJtagTx</code>；<code>UsbSerialJtag::new(peripherals.USB_DEVICE)</code>，<code>into_async().split()</code> 后实现 <code>embedded-io(-async)</code> 的 <code>Read</code> / <code>Write</code></td>
+<td>⚒️，固定 CDC-ACM + JTAG，64 字节 payload，占 GPIO18/19</td>
+</tr>
+<tr>
+<td>中断</td>
+<td><code>esp_hal::interrupt</code>（+ <code>interrupt::software</code>）</td>
+<td><code>SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)</code> → <code>software_interrupt0</code>（供 <code>esp-rtos</code> 用，见第 2 章）；<code>#[handler]</code> 等中断注册宏的确切名字未核实，查 docs.rs 为准</td>
+<td>⚒️</td>
+</tr>
+<tr>
+<td>时钟</td>
+<td><code>esp_hal::clock</code></td>
+<td><code>CpuClock</code>；<code>esp_hal::Config::default().with_cpu_clock(CpuClock::max())</code></td>
+<td>稳定，最高 160 MHz</td>
+</tr>
+<tr>
+<td>温度传感器</td>
+<td><code>esp_hal::tsens</code></td>
+<td>模块存在；具体 API 未核实</td>
+<td>⚒️，片内 1 个</td>
+</tr>
+<tr>
+<td>eFuse / RTC / 系统</td>
+<td><code>esp_hal::efuse</code> / <code>rtc_cntl</code> / <code>system</code> / <code>rom</code> / <code>assist_debug</code></td>
+<td>均有模块；具体方法未核实</td>
+<td>⚒️</td>
+</tr>
+<tr>
+<td>Wi-Fi / BLE</td>
+<td><strong>不在 esp-hal，在 <code>esp-radio</code></strong></td>
+<td><code>esp_radio::wifi</code> 等，需 <code>esp-alloc</code> 堆 + <code>esp-rtos</code> 调度器，TCP/IP 走 <code>embassy-net</code></td>
+<td>C3：Wi-Fi 4 + BLE 5 LE，无经典蓝牙</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12-c3">1.2 常用外设示例（C3，阻塞版）</h3>
+<p><strong>GPIO 输出（Blink）</strong></p>
+<pre><code class="language-rust">use esp_hal::gpio::{Level, Output, OutputConfig};
+let mut led = Output::new(peripherals.GPIO8, Level::Low, OutputConfig::default());
+led.toggle();
+</code></pre>
+<p><strong>GPIO 输入 + 中断等待（异步见第 2 章）</strong></p>
+<pre><code class="language-rust">use esp_hal::gpio::{Event, Input, InputConfig};
+let mut button = Input::new(peripherals.GPIO9, InputConfig::default());
+// 阻塞版轮询：button.is_high() / button.is_low()
+// 异步版：button.wait_for_rising_edge().await
+</code></pre>
+<p><strong>I2C 读传感器</strong></p>
+<pre><code class="language-rust">use esp_hal::i2c::master::{Config, I2c};
+let mut i2c = I2c::new(peripherals.I2C0, Config::default())?;
+let mut buf = [0u8; 2];
+i2c.write_read(0x48, &amp;[0x00], &amp;mut buf)?;
+</code></pre>
+<p><strong>SPI 读写</strong></p>
+<pre><code class="language-rust">use esp_hal::spi::master::{Config, Mode, Spi};
+use esp_hal::time::Rate;
+let spi = Spi::new(
+    peripherals.SPI2,
+    Config::default()
+        .with_frequency(Rate::from_khz(100))
+        .with_mode(Mode::_0),
+)?
+.with_sck(peripherals.GPIO6)
+.with_mosi(peripherals.GPIO7)
+.with_miso(peripherals.GPIO2);
+// 再用 embedded-hal 的 SpiBus：spi.write(&amp;[0x01]) / spi.transfer(&amp;mut buf)
+</code></pre>
+<p><strong>UART 收发</strong></p>
+<pre><code class="language-rust">use esp_hal::uart::{Config, Uart};
+let mut uart = Uart::new(peripherals.UART1, Config::default())?;
+uart.write(b&quot;hello&quot;)?;
+let mut buf = [0u8; 16];
+let _n = uart.read(&amp;mut buf)?;
+</code></pre>
+<p><strong>ADC 单次采样</strong></p>
+<pre><code class="language-rust">use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
+let mut adc_config = AdcConfig::new();
+let mut pin = adc_config.enable_pin(peripherals.GPIO0, Attenuation::_11dB);
+let mut adc = Adc::new(peripherals.ADC1, adc_config);
+let value: u16 = nb::block!(adc.read_oneshot(&amp;mut pin))?;
+</code></pre>
+<p><strong>LEDC 调光</strong></p>
+<pre><code class="language-rust">use esp_hal::ledc::{Ledc, timer::{self, TimerIFace}, channel::{self, ChannelIFace}};
+use esp_hal::time::Rate;
+let mut ledc = Ledc::new(peripherals.LEDC);
+let mut timer = ledc.timer::&lt;timer::LowSpeed&gt;(timer::Number::Timer0);
+timer.configure(timer::config::Config {
+    duty: timer::config::Duty::Duty5Bit,
+    clock_source: timer::LSClockSource::APBClk,
+    frequency: Rate::from_khz(24),
+})?;
+let mut channel = ledc.channel(channel::Number::Channel0, peripherals.GPIO8);
+channel.configure(channel::config::Config {
+    timer: &amp;timer,
+    duty_pct: 10,
+    pin_config: channel::config::PinConfig::PushPull,
+})?;
+channel.set_duty(50)?;
+</code></pre>
+<hr />
+<h2 id="2-embassy-esp-rtosc3">2. 异步专章：Embassy + <code>esp-rtos</code>（C3 专用）</h2>
+<p>v1 只有一句话“异步配合 Embassy 使用”，这一章是 v2 补的核心。</p>
+<h3 id="21">2.1 总结构：谁负责什么</h3>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>负责什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>esp-hal</code></td>
+<td>外设驱动（Blocking + Async 两种形态）</td>
+</tr>
+<tr>
+<td><code>esp-rtos</code></td>
+<td>调度器 + Embassy 时间驱动 + Embassy 执行器（1.x 线的官方接法）</td>
+</tr>
+<tr>
+<td><code>embassy-executor</code></td>
+<td>任务宏 <code>#[embassy_executor::task]</code>、执行器类型</td>
+</tr>
+<tr>
+<td><code>embassy-time</code></td>
+<td><code>Timer</code>、<code>Duration</code>、<code>Instant</code>、<code>Ticker</code>、超时</td>
+</tr>
+<tr>
+<td><code>embassy-sync</code></td>
+<td>任务间 <code>Channel</code> / <code>Signal</code> / <code>Mutex</code> / <code>PubSubChannel</code></td>
+</tr>
+<tr>
+<td><code>embassy-futures</code></td>
+<td><code>select</code> / <code>join</code> 等 future 组合子</td>
+</tr>
+<tr>
+<td><code>embassy-net</code></td>
+<td>TCP/IP 栈，见第 11 章</td>
+</tr>
+<tr>
+<td><code>esp-radio</code></td>
+<td>Wi-Fi / BLE 的后台协议栈，见第 8–9 章</td>
+</tr>
+</tbody>
+</table>
+<p><strong>不要再用 <code>esp-hal-embassy</code></strong>：它是更早的接法，1.x 的新工程请走
+<code>esp-rtos</code> 路线，不要把两套调度器混在一个工程里。</p>
+<h3 id="22">2.2 启动顺序（错一步就醒不过来）</h3>
+<pre><code class="language-rust">#[esp_rtos::main]
+async fn main(spawner: Spawner) -&gt; ! {
+    let peripherals = esp_hal::init(esp_hal::Config::default());
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+    // 堆要在 esp-radio 之前建好（见第 3 章）
+    // esp_alloc::heap_allocator!(size: 72 * 1024);
+    // 再 esp_radio::init() / wifi::new() …
+    spawner.spawn(my_task()).unwrap();
+    loop { Timer::after(Duration::from_secs(60)).await; }
+}
+</code></pre>
+<p>顺序：<code>esp_hal::init</code> → <code>esp_rtos::start</code> → 堆 → <code>esp_radio::init</code> →
+<code>wifi::new</code>。<code>esp-rtos</code> 的 feature：<code>embassy</code>（Embassy 集成：时间驱动 +
+执行器）、<code>esp-radio</code>、<code>esp-alloc</code>、<code>log-04</code> / <code>defmt</code>，芯片选 <code>esp32c3</code>。
+<strong>不要给 <code>embassy-executor</code> 开任何 <code>arch-*</code> feature</strong>，这是 <code>esp-rtos</code>
+文档明确说的。</p>
+<h3 id="23">2.3 哪些驱动有异步版</h3>
+<table>
+<thead>
+<tr>
+<th>驱动</th>
+<th>开异步方式</th>
+<th>关键异步方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I2C master</td>
+<td><code>i2c.into_async()</code></td>
+<td><code>write_async(addr, &amp;buf).await</code>、<code>read_async(addr, &amp;mut buf).await</code>、<code>write_read_async(…).await</code>、<code>transaction_async(addr, &amp;mut [Operation::Write(..), Operation::Read(..)]).await</code>；阻塞方法在 async 模式下仍可用</td>
+</tr>
+<tr>
+<td>UART</td>
+<td><code>uart.into_async()</code>（<code>Uart</code> / <code>UartTx</code> 同理）</td>
+<td><code>write_async(&amp;msg).await</code>、<code>flush_async().await</code>、<code>read_async(&amp;mut buf).await</code></td>
+</tr>
+<tr>
+<td>SPI master</td>
+<td><code>Spi</code> 可阻塞 / 异步两用 + DMA 版 <code>into_async()</code></td>
+<td>固有 <code>*_async</code> 方法名未核实；应走 <code>embedded-hal-async</code> 的 <code>SpiBus</code> trait（<code>read</code> / <code>write</code> / <code>transfer</code> / <code>transfer_in_place</code> 的 async 版），DMA 版走 <code>SpiDmaBus</code></td>
+</tr>
+<tr>
+<td>USB-Serial-JTAG</td>
+<td><code>UsbSerialJtag::new(…).into_async().split()</code> → <code>(rx, tx)</code></td>
+<td><code>embedded-io-async</code> 的 <code>Read</code> / <code>Write</code></td>
+</tr>
+<tr>
+<td>GPIO Input / Flex</td>
+<td>本身即支持 await（需 <code>unstable</code>）</td>
+<td><code>wait_for(Event)</code>、<code>wait_for_high()</code>、<code>wait_for_low()</code>、<code>wait_for_rising_edge()</code>、<code>wait_for_falling_edge()</code>、<code>wait_for_any_edge()</code>；<strong><code>Flex::wait_for</code> 注明不是 cancellation-safe</strong>，会覆盖之前的 <code>listen</code></td>
+</tr>
+<tr>
+<td>OneShotTimer / PeriodicTimer</td>
+<td><code>OneShotTimer::new(…).into_async()</code></td>
+<td><code>delay_millis_async</code> / <code>delay_micros_async</code> / <code>delay_nanos_async</code>；Periodic 的 async <code>wait</code> 未核实</td>
+</tr>
+<tr>
+<td>ADC</td>
+<td><strong>未找到异步版</strong></td>
+<td>只有阻塞 <code>read_oneshot</code>；在 async 任务里直接调会占住 executor，短调用可接受，要么另起任务 / 用阻塞任务包装——不要写成“ADC 有 async”</td>
+</tr>
+<tr>
+<td>Wi-Fi（esp-radio）</td>
+<td><code>esp_radio::wifi</code> + <code>embassy-net</code></td>
+<td><code>Runner::run().await</code> 等，走 <code>embassy-net</code> 的 async socket（见第 8、11 章）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="24-delay-vs-embassy_timetimer">2.4 <code>Delay</code> vs <code>embassy_time::Timer</code>（最容易混的两处）</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>esp_hal::delay::Delay</code></th>
+<th><code>embassy_time::Timer</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>本质</td>
+<td><strong>阻塞忙等</strong>：<code>Delay::new()</code>，内部用 SYSTIMER 计时，<code>delay_millis</code> / <code>delay_micros</code> / <code>delay_nanos</code>（另实现 <code>embedded-hal</code> 的 <code>DelayNs::delay_ns</code>），“至少等这么久”，精度受中断影响</td>
+<td><strong>异步让出</strong>：<code>Timer::after(Duration::from_millis(500)).await</code> / <code>Timer::after_millis(500).await</code>，到时由时间驱动唤醒，期间 executor 可跑别的任务</td>
+</tr>
+<tr>
+<td>前提</td>
+<td>不用 executor，<code>#[esp_hal::main]</code> 的阻塞程序直接用</td>
+<td>必须已 <code>esp_rtos::start(…)</code> 启动时间驱动，否则不会醒</td>
+</tr>
+<tr>
+<td>用法</td>
+<td>短时精确等待、传感器触发脉冲、初始化时延</td>
+<td>任务间节拍、Blink、周期采样；另有 <code>embassy_time::Delay</code> 可作 async 版 <code>DelayNs</code> 传给驱动</td>
+</tr>
+</tbody>
+</table>
+<h3 id="25">2.5 任务、定时、超时、二选一</h3>
+<pre><code class="language-rust">use embassy_executor::Spawner;
+use embassy_time::{Duration, Instant, Timer, Ticker, with_timeout, TimeoutError};
+use embassy_futures::select::{select, Either};
+
+// 生成任务：参数必须 'static、非泛型、具体类型
+spawner.spawn(blink_task()).unwrap();
+
+#[embassy_executor::task]
+async fn blink_task() {
+    loop {
+        Timer::after(Duration::from_millis(500)).await;
+    }
+}
+
+// 周期任务：Ticker 比每次 Timer::after 更准（不累计漂移）
+let mut ticker = Ticker::every(Duration::from_secs(1));
+loop {
+    ticker.next().await;
+    // 采样一次
+}
+
+// 超时：超时会 drop 掉那个 future
+match with_timeout(Duration::from_secs(5), some_future).await {
+    Ok(v) =&gt; { /* 按时完成 */ }
+    Err(TimeoutError) =&gt; { /* 超时 */ }
+}
+
+// 二选一：先完成者胜
+match select(socket.read(&amp;mut buf), Timer::after(Duration::from_secs(10))).await {
+    Either::First(n) =&gt; { /* 读到了 */ }
+    Either::Second(()) =&gt; { /* 超时 */ }
+}
+</code></pre>
+<p><code>embassy_futures::join::join</code> 是等全部完成（BLE host + 广播循环常用），
+与 <code>select</code> 的“先完成者胜”正好相反。</p>
+<h3 id="26-channel-signal-mutex">2.6 任务间通信：<code>Channel</code> / <code>Signal</code> / <code>Mutex</code></h3>
+<pre><code class="language-rust">use embassy_sync::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::Channel,
+    mutex::Mutex,
+    signal::Signal,
+};
+
+// MPMC 通道：每条消息只被一个消费者收到
+static LED_CH: Channel&lt;ThreadModeRawMutex, bool, 4&gt; = Channel::new();
+// 只给一个消费者发最新值
+static STATE: Signal&lt;ThreadModeRawMutex, u8&gt; = Signal::new();
+// 共享可变状态
+static SHARED: Mutex&lt;ThreadModeRawMutex, u32&gt; = Mutex::new(0);
+
+LED_CH.send(true).await;
+let v = LED_CH.receive().await;
+STATE.signal(42);
+let v = STATE.wait().await;
+let mut guard = SHARED.lock().await;
+*guard += 1;
+</code></pre>
+<p><code>RawMutex</code> 常用 <code>ThreadModeRawMutex</code> 或 <code>CriticalSectionRawMutex</code>。
+<code>PubSubChannel</code> 是广播（一发多收），与 <code>Channel</code> 的一发一收不同。</p>
+<h3 id="27-c3-1-risc-v">2.7 单核影响（C3 只有 1 个 RISC-V 核，这条必须记住）</h3>
+<p>Embassy 是<strong>协作式调度，没有抢占</strong>——任务只在 <code>.await</code> 处让出 CPU；
+一个从不 <code>.await</code> 的长计算会饿死 Wi-Fi、<code>net_task</code>、BLE，
+表现为断线 / 丢包 / 超时。<code>esp-rtos</code> 的调度器是给 radio 后台用的，
+不是让你并行跑两个核。任务间传数据用 <code>Channel</code> / <code>Signal</code> / <code>Mutex</code>，
+不要共享可变裸状态；<code>'static</code> 约束意味着共享资源一般放 <code>static</code> 里
+（<code>StaticCell</code> / <code>static Mutex</code>）。</p>
+<p>异步驱动不是 <code>Send</code>（中断绑在当前核），跨核先传 Blocking 版、
+到目标核再 <code>into_async</code>；<strong>C3 单核可忽略这条</strong>。</p>
+<hr />
+<h2 id="3-esp-alloc-no_std">3. <code>esp-alloc</code> —— <code>no_std</code> 下的堆</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>A <code>no_std</code> heap allocator for RISC-V and Xtensa processors from Espressif.
+Supports all currently available ESP32 devices.</p>
+</blockquote>
+<p>中文：面向 Espressif RISC-V 和 Xtensa 处理器的 <code>no_std</code> 堆分配器，
+支持目前所有 ESP32 设备。</p>
+<h3 id="_7">翻译详解</h3>
+<p>在 <code>no_std</code> 环境下，标准库不存在，<code>Vec</code>、<code>Box</code>、<code>String</code>、
+<code>HashMap</code> 这些需要堆的东西默认是不能用的。<code>esp-alloc</code> 就是补上这一块：
+它提供一个全局堆分配器，让 <code>alloc</code> crate 能在裸机上工作。</p>
+<p>最常用的写法只有一行宏，在 <code>main</code> 开头、用到堆之前调用：</p>
+<pre><code class="language-rust">esp_alloc::heap_allocator!(size: 72 * 1024);
+</code></pre>
+<p>意思是：划 72 KiB 出来当全局堆。堆多大没有标准答案，要按你的程序算：
+Wi-Fi、网络协议栈、显示缓冲、JSON 解析都会吃堆，太小会在运行时
+分配失败，太大又会挤占栈和其他静态内存。先给一个保守值，
+跑起来后再用 <code>esp_alloc::HEAP.stats()</code> 看实际占用去调。</p>
+<p>进阶用法（保持原文名）：</p>
+<ul>
+<li><code>heap_allocator!</code>：最常用，指定字节数建一个内部 RAM 堆；
+  只接受 <code>size:</code> + 属性，没有其它变体；</li>
+<li><code>heap_allocator!(#[ram(reclaimed)] size: 64 * 1024)</code>：把二级 bootloader
+  用过、主程序阶段已空闲的内存也回收进堆。这段内存启动阶段不能当栈用，
+  但进主程序后当堆是安全的；</li>
+<li>手动建堆：<code>static mut HEAP: MaybeUninit&lt;[u8; HEAP_SIZE]&gt;;</code> +
+  <code>HEAP.add_region(HeapRegion::new(ptr, size, MemoryCapability::Internal.into()))</code>；</li>
+<li><strong><code>psram_allocator!</code> 在 C3 上不适用（C3 无 PSRAM），不要写进 C3 文档。</strong></li>
+</ul>
+<h3 id="heapstats"><code>HEAP.stats()</code>：怎么看堆还剩多少</h3>
+<pre><code class="language-rust">println!(&quot;{}&quot;, esp_alloc::HEAP.stats());
+</code></pre>
+<p><code>esp_alloc::HEAP.stats() -&gt; HeapStats</code>，<code>HeapStats</code> 实现 <code>Display</code> /
+<code>defmt::Format</code>，可直接打印。公开字段只有
+<code>region_stats: [Option&lt;RegionStats&gt;; 3]</code>、<code>size</code>、<code>current_usage</code>；
+示例输出里的 <code>Max usage</code> / <code>Total freed</code> / <code>Total allocated</code>
+需开 <code>internal-heap-stats</code>（每次 alloc/dealloc 多算一次），
+结构体页未逐项列出，写代码时以 docs.rs 为准。</p>
+<h3 id="c3">C3 堆多大够用（经验法则，非官方数字）</h3>
+<p>C3 总 SRAM 400 KB，没有官方推荐值，只能给实测参照：</p>
+<ul>
+<li>不联网：32–64 KB 够跑；</li>
+<li>Wi-Fi 或 BLE：至少留 128 KB 以上再加应用余量；</li>
+<li>实测参照：某 C3 项目配 <code>#[ram(reclaimed)]</code> 66,320 字节 + 主堆 174,080
+  字节 ≈ 236 KB；Wi-Fi STA 实测堆占用 47–57 KB、开放 AP 53–63 KB；
+  另一 C3 显示项目用 150 KB 堆。</li>
+</ul>
+<p><strong>最终以 <code>HEAP.stats()</code> 实测为准</strong>，不要把上面的参照当成官方数字。</p>
+<h3 id="_8">必须知道的几条限制</h3>
+<ol>
+<li><strong>全局分配器只能有一个。</strong> 你可以给这一个分配器配多个内存区
+   （内部 RAM、PSRAM、多个不连续块），但不能同时注册两个全局分配器。
+   需要多个独立分配器时，要走 nightly 的 <code>allocator_api</code> 或
+   <code>allocator_api2</code>，<code>esp-alloc</code> 对后者有实现。
+   nightly 可直接用 <code>alloc</code> 的 <code>Box</code> / <code>Vec::new_in</code>；stable 可用
+   <code>allocator-api2 = { version = "0.3", features = ["alloc"] }</code> +
+   <code>esp_alloc::{InternalMemory, ExternalMemory, AnyMemory}</code>，
+   如 <code>Vec::new_in(esp_alloc::InternalMemory)</code>；另有 <code>EspHeap::empty()</code> +
+   <code>add_region()</code> 自建堆（最多 3 个 region）。</li>
+<li><strong>不是所有 RAM 都能拼成一块平坦的堆。</strong> 有些芯片的内存映射不连续，
+   有的区域是 ROM 代码保留的，不能覆盖；上一点提到的 <code>reclaimed</code> 内存
+   就是处理这种不连续的办法之一。</li>
+<li><strong>Xtensa 芯片 + PSRAM 有个原子操作坑。</strong> 在 Xtensa 芯片上，
+   PSRAM 里的原子操作工作不正常，可能造成数据竞争、让原子操作的意义失效，
+   因此分配器不能用来分配 <code>Atomic*</code> 类型。RISC-V 芯片（C3/C6/H2）
+   不受这条影响，PSRAM 里的原子操作是正常的。<strong>C3 本来就没有 PSRAM，
+   这条对 C3 只是背景知识。</strong></li>
+<li><strong>作全局分配器用时，Rust 版本要求。</strong> 官方文档注明需要 Rust 1.68
+   或更高版本，或者 nightly 通道。现在的稳定版 Rust 早已满足，
+   这条更多是历史说明，不用特意切 nightly。</li>
+</ol>
+<h3 id="_9">没有堆会坏什么</h3>
+<p><code>alloc</code> 的 <code>Vec</code> / <code>String</code> / <code>Box</code> 全不可用；<strong>Wi-Fi / BLE 必须有
+动态分配器 + 抢占式调度器（<code>esp-rtos</code>）</strong>（<code>esp-radio</code> 文档原话）；
+<code>embassy-net</code>（底层 smoltcp）同样要堆。<strong>顺序必须是：先建堆 →
+再 <code>esp_radio::init()</code> / <code>esp_rtos::start()</code></strong>，否则 radio 初始化分配即失败。</p>
+<p>一句话：没有堆需求（纯 Blink、纯 GPIO）可以不用它；
+一旦要用 <code>Vec</code>、字符串、Wi-Fi、网络、显示库，它就是必选项，
+而且要在用堆之前、越早初始化越好。</p>
+<hr />
+<h2 id="4-esp-backtrace-panic">4. <code>esp-backtrace</code> —— panic 时告诉你死在哪</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>Bare-metal backtrace support for Espressif devices.</p>
+</blockquote>
+<p>中文：面向 Espressif 设备的裸机调用栈（backtrace）支持。</p>
+<h3 id="_10">翻译详解</h3>
+<p><code>no_std</code> 的二进制程序没有默认的 panic 处理器，不自己提供一个，
+程序根本编不过。<code>esp-backtrace</code> 就是官方推荐的那个处理器：
+panic 或 CPU 异常发生时，它会把出错原因和调用栈打印到串口，
+然后停住（或按配置 halt 所有核），而不是悄无声息地死机。</p>
+<p>用法上它几乎是“零代码”的，只要在依赖里打开 feature，
+并在 <code>main.rs</code> 顶部导入一次：</p>
+<pre><code class="language-toml">esp-backtrace = { version = &quot;0.18&quot;, features = [&quot;esp32c3&quot;, &quot;panic-handler&quot;, &quot;println&quot;] }
+</code></pre>
+<pre><code class="language-rust">use esp_backtrace as _;
+</code></pre>
+<p><code>as _</code> 的意思是：我不需要直接调用它里面的任何东西，
+只要让它把 panic 处理器注册进最终产物。</p>
+<h3 id="feature">关键 feature（保持原文）</h3>
+<table>
+<thead>
+<tr>
+<th>feature</th>
+<th>中文含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>panic-handler</code></td>
+<td>接管 Rust 的 <code>panic!</code>，会引入 <code>esp-println</code> 做输出</td>
+</tr>
+<tr>
+<td><code>exception-handler</code></td>
+<td>接管 CPU 异常（非法指令、访存错误等），同样会引入 <code>esp-println</code>；<strong>0.19 版文档只提 panic handler，新版是否保留未核实</strong></td>
+</tr>
+<tr>
+<td><code>println</code></td>
+<td>用 <code>esp-println</code> 打印消息</td>
+</tr>
+<tr>
+<td><code>defmt</code></td>
+<td>改用 <code>defmt</code> 日志格式打印 panic / 异常消息</td>
+</tr>
+<tr>
+<td><code>colors</code></td>
+<td>打印的消息带颜色（只对 panic / 异常处理器有效）</td>
+</tr>
+<tr>
+<td><code>halt-cores</code></td>
+<td>panic / 异常时停住 ESP32 / ESP32-S3 的两个核，而不是只在一个核上空转；<strong>C3 单核可忽略</strong></td>
+</tr>
+<tr>
+<td><code>semihosting</code></td>
+<td>panic 时调用 <code>semihosting::process::abort()</code></td>
+</tr>
+<tr>
+<td><code>custom-halt</code> / <code>custom-pre-backtrace</code></td>
+<td>调用外部 <code>custom_halt()</code> / <code>custom_pre_backtrace()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="c3-force-frame-pointers">C3 专属：必须加 <code>force-frame-pointers</code></h3>
+<p>C3 是 RISC-V，<strong>必须在 <code>.cargo/config.toml</code> 加 <code>"-C", "force-frame-pointers"</code></strong>，
+否则 panic 处理只打印栈转储、需工具解码：</p>
+<pre><code class="language-toml"># .cargo/config.toml
+[build]
+rustflags = [&quot;-C&quot;, &quot;force-frame-pointers&quot;]
+</code></pre>
+<h3 id="_11">自取回溯与解码</h3>
+<ul>
+<li>自取回溯：<code>arch::backtrace()</code>，默认最多 10 帧
+  （<code>ESP_BACKTRACE_CONFIG_BACKTRACE_FRAMES</code>，默认 10；
+  栈转储上限 <code>ESP_BACKTRACE_CONFIG_STACK_DUMP_MAX_SIZE</code>，默认 8K，
+  可选 4K / 8K / 16K / 32K）。</li>
+<li>串口上看到的是一串地址，想看到函数名和行号，要用 <code>espflash</code> 等工具
+  结合 ELF 文件解析。新版 espflash 支持按 <code>.debug_frame</code> 解码 RISC-V
+  回溯（另有 <code>.eh_frame</code>），<code>monitor</code> 有 <code>--unwind-tables auto|debug-frame|eh-frame</code>、
+  <code>--all-addresses</code>、<code>--no-addresses</code> 等选项。</li>
+</ul>
+<h3 id="_12">容易踩的坑</h3>
+<ul>
+<li><strong><code>esp-backtrace</code> 和 <code>esp-println</code> 的输出通道必须一致。</strong>
+  例如一个走 UART、一个走 USB-Serial-JTAG，那 panic 信息就可能
+  发到你没在看的那条通道上，看起来像“没打印”。</li>
+<li><strong>它和 <code>panic-probe</code> 只能二选一。</strong> 一个最终产物里只能有一个
+  panic 处理器，两个都引进来会链接冲突。</li>
+<li><strong>调用栈地址需要配合符号表解析。</strong> 串口上看到的是一串地址，
+  想看到函数名和行号，要用 <code>espflash</code> 等工具结合 ELF 文件解析，
+  不是串口直接给你中文函数名。</li>
+</ul>
+<hr />
+<h2 id="5-esp-println">5. <code>esp-println</code> —— 串口打印和日志</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>Provides <code>print!</code> and <code>println!</code> implementations various Espressif devices.</p>
+</blockquote>
+<p>中文：为各类 Espressif 设备提供 <code>print!</code>、<code>println!</code> 的实现。</p>
+<h3 id="_13">翻译详解</h3>
+<p><code>esp-println</code> 解决的是 <code>no_std</code> 下最基础的问题：没有标准库，
+<code>println!</code> 默认是没有地方可去的。这个 crate 把 <code>print!</code>、<code>println!</code>、
+<code>dbg!</code> 接到芯片的串口输出上，并在此基础上提供日志能力，
+支持所有 ESP32 系列设备。</p>
+<p>基本用法：</p>
+<pre><code class="language-toml">esp-println = { version = &quot;0.18&quot;, features = [&quot;esp32c3&quot;, &quot;log-04&quot;] }
+</code></pre>
+<pre><code class="language-rust">use esp_println::println;
+println!(&quot;Hello world&quot;);
+</code></pre>
+<p>注意：一定要开芯片 feature，不开或开错芯片，输出通道就可能不对。</p>
+<h3 id="_14">输出通道（二选一，必须且只能开一个）</h3>
+<table>
+<thead>
+<tr>
+<th>feature</th>
+<th>中文含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auto</code>（默认）</td>
+<td>运行时检测：检测到 USB SOF 包 → 走 USB-Serial-JTAG，否则走 UART；源码按 <code>USB_DEVICE_INT_RAW</code> 判断，C3 地址 <code>0x60043008</code></td>
+</tr>
+<tr>
+<td><code>jtag-serial</code></td>
+<td>走 USB-Serial-JTAG</td>
+</tr>
+<tr>
+<td><code>uart</code></td>
+<td>走 UART（C3 走 UART0）</td>
+</tr>
+<tr>
+<td><code>no-op</code></td>
+<td>不输出</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>USB-Serial-JTAG</strong>：只在 ESP32-C3、C5、C6、C61、H2、S3 等
+  自带 USB-Serial-JTAG 的芯片上可用，C3 的开发板插上 USB 线就能看日志，
+  不需要外接串口芯片；C3 上是 GPIO18/19，烧录和打印可共用一根 USB 线。</li>
+<li><strong><code>defmt</code> 后端</strong>：用 <code>defmt-espflash</code> feature 时，<code>esp-println</code>
+  会装一个 <code>defmt</code> 全局日志器，输出和 <code>println!()</code> 走同一条数据流，
+  主机端用 <code>espflash</code> 解码，日志体积更小、格式更结构化；
+  <code>defmt</code> 输出带 rzCOBS 帧，<strong>只能用 espflash 读</strong>
+  （<code>espflash monitor --log-format defmt</code>）。</li>
+</ul>
+<p>与 <code>esp-backtrace</code> 的配对表（旧版文档，0.18 需复核）：
+<code>uart</code> ↔ <code>print-uart</code>，<code>jtag-serial</code> ↔ <code>print-jtag-serial</code>；
+<strong>两边输出方式不一致时 panic 信息会丢。</strong></p>
+<h3 id="log-crate">日志：<code>log</code> crate 的简单实现</h3>
+<p>打开 <code>log-04</code> feature、并依赖 <code>log</code> 0.4 后，就可以初始化一个
+简单的日志器：</p>
+<pre><code class="language-rust">esp_println::logger::init_logger(log::LevelFilter::Info);
+log::info!(&quot;Logger is setup&quot;);
+</code></pre>
+<p>也可以用环境变量的方式，让级别跟随环境走：</p>
+<pre><code class="language-rust">esp_println::logger::init_logger_from_env();
+</code></pre>
+<p>这时用到的环境变量是 <code>ESP_LOG</code>，写法类似 <code>RUST_LOG</code>，
+例如 <code>warn,test::foo=info,test::foo::bar=debug</code>，但<strong>不支持正则表达式</strong>。
+注意：<code>init_logger_from_env()</code> 读的是<strong>编译期</strong>环境变量 <code>ESP_LOG</code>
+（build.rs 生成过滤表），不是运行期改的。
+默认 feature 里还有 <code>colors</code>，日志输出会带颜色。
+<code>timestamp</code> feature 需自己实现 <code>_esp_println_timestamp() -&gt; u64</code>
+（毫秒，可用 <code>esp_hal::time::Instant</code>）。</p>
+<p>如果这个简单日志器不够用（例如你要写文件、发网络、做过滤），
+官方文档的建议是：在 <code>esp-println</code> 之上自己实现一个 <code>log</code> 的
+<code>Log</code> trait，而不是去改 <code>esp-println</code> 本身。</p>
+<hr />
+<h2 id="6-esp-storage-flash">6. <code>esp-storage</code> —— Flash 底层读写，不是文件系统</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>Implementation of embedded-storage traits to access unencrypted ESP32 flash.</p>
+</blockquote>
+<p>中文：实现 <code>embedded-storage</code> trait，用于访问未加密的 ESP32 Flash。</p>
+<h3 id="_15">翻译详解</h3>
+<p><code>esp-storage</code> 给你的是 Flash 的“裸读写”能力：按地址读、按扇区擦、
+按页写，数据掉电不丢失。它本身<strong>不是</strong>文件系统，
+也不是键值数据库，上面要跑什么由你选：</p>
+<ul>
+<li>直接用它提供的 <code>FlashStorage</code> 做定长记录、配置块；</li>
+<li>在它上面跑 <code>esp-nvs</code>，得到和 ESP-IDF 兼容的 NVS 键值存储（见第 7 章）；</li>
+<li>在它上面跑 littlefs 等文件系统，得到文件读写。</li>
+</ul>
+<p>典型用法：</p>
+<pre><code class="language-rust">let storage = esp_storage::FlashStorage::new(peripherals.FLASH);
+</code></pre>
+<p>注意 <code>peripherals.FLASH</code> 这个外设单例：Flash 外设也是从
+<code>esp_hal::init</code> 返回的 <code>Peripherals</code> 里取的，和 GPIO、I2C 一样，
+不能凭空 new 一个。<strong>重复调用 <code>FlashStorage::new</code> 会 panic。</strong></p>
+<h3 id="api">API 分层（不要混淆）</h3>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>embedded-storage</code> trait</td>
+<td><code>ReadStorage::read(offset, &amp;mut [u8])</code>、<code>Storage::write(offset, &amp;[u8])</code>（内部按扇区读-改-擦-写）、<code>NorFlash::{read, write, erase}</code>，以及 <code>READ_SIZE</code> / <code>WRITE_SIZE</code> / <code>ERASE_SIZE</code>（最小读 / 写 / 擦单位）</td>
+</tr>
+<tr>
+<td>底层（<code>low-level</code> feature，<code>ll.rs</code>，全是 <code>unsafe</code>、不做前置检查）</td>
+<td><code>spiflash_read</code> / <code>spiflash_write</code> / <code>spiflash_erase_sector</code> / <code>spiflash_erase_block</code> / <code>spiflash_unlock</code> / <code>spiflash_write_encrypted</code></td>
+</tr>
+</tbody>
+</table>
+<p>常量（<code>esp-storage</code> 0.8.0 源码已核对）：<code>WORD_SIZE: u32 = 4</code>，
+<code>SECTOR_SIZE: u32 = 4096</code>。C3 的扇区 / 字大小与全系列通用，
+<strong>C3 专属的只是 Flash 容量（通常 4 MB，<code>capacity()</code> 自动识别）和“单核”</strong>——
+源码里 <code>FlashStorageError</code> 有“多核运行时不可写 Flash”的变体，C3 单核用不上。
+<code>capacity()</code> 返回总字节数，由 bootloader 头里的 Flash 大小字段决定。</p>
+<p>坑（esp-hal issue #5484，已核实）：<code>ReadNorFlash::read</code> 目标切片若非
+4 字节对齐，会在栈上悄悄分配 4096 字节的 <code>FlashSectorBuffer</code> 做中转；
+<code>[u8; 4096]</code> 本身不对齐保证。</p>
+<h3 id="_16">必须知道的限制</h3>
+<ol>
+<li><strong>未加密。</strong> 这个 crate 访问的是未加密 Flash，敏感数据
+   （Wi-Fi 密码、密钥）不要明文往里写，要加密后再存，
+   或者走 ESP-IDF 的加密分区方案。</li>
+<li><strong>Flash 有擦写寿命和扇区粒度。</strong> 读可以无限次，写要按扇区擦除
+   再写，频繁写同一个地址会加速损耗。需要频繁更新的计数、
+   日志类数据，要做磨损均衡或换 NVS / 文件系统，不要直接裸写。
+   NOR 规则：写前必须擦除（只能 1→0），同一 word 不可写两次，
+   断电时正在写的 word 内容未定义、其余页保证不变；擦除后区间全为 1。</li>
+<li><strong>不要写到程序和分区表所在的区域。</strong> Flash 里有分区表、
+   bootloader、应用本身，写错偏移会把固件写坏。用 NVS 或文件系统时，
+   要按分区表给它划一块专用的偏移和大小，参数必须和你的分区表对上，
+   不能随手填（见第 7 章的分区表）。</li>
+<li><strong><code>low-level</code> feature 是给 <code>esp-nvs</code> 这类上层用的。</strong>
+   普通应用直接用 <code>FlashStorage</code> 就够了。旧版 <code>esp-nvs</code> 示例说需要
+   <code>low-level</code>，但 0.5.0 的文档改为“两边开同一芯片 feature 即可，
+   ROM CRC32 由 <code>esp-nvs</code> 的 <code>Crc</code> 实现提供；不要 ROM CRC 可自己用
+   <code>esp_nvs::platform::software_crc32</code> 实现 <code>Crc</code>”——当前版是否仍需
+   <code>low-level</code> 未核实，写文档时以 docs.rs 为准。</li>
+</ol>
+<h3 id="esp-idf-c3">分区表（ESP-IDF 通用，非 C3 专属）</h3>
+<p>分区表本身在 Flash <code>0x8000</code>，长 <code>0xC00</code>。no_std 下 espflash 是否默认
+刷分区表<strong>未核实</strong>，写文档时必须说明“需自带 <code>partitions.csv</code> 并确认
+刷入方式”，不要写成默认就有。</p>
+<p>单 factory、无 OTA：</p>
+<pre><code class="language-csv">nvs,      data, nvs,     0x9000,  0x6000
+phy_init, data, phy,     0xf000,  0x1000
+factory,  app,  factory, 0x10000, 1M
+</code></pre>
+<p>双 OTA：</p>
+<pre><code class="language-csv">nvs,      data, nvs,     0x9000,  0x4000
+otadata,  data, ota,     0xd000,  0x2000
+factory,  app,  factory, 0x10000, 1M
+ota_0,    app,  ota_0,   0x110000, 1M
+ota_1,    app,  ota_1,   0x210000, 1M
+</code></pre>
+<p>结论：用默认表时，<code>esp-nvs</code> 应传 <code>partition_offset = 0x9000,
+partition_size = 0x6000</code>（OTA 表则 <code>0x4000</code>），不是 v1 示例的
+<code>0x390000 / 0x32000</code>——那只是某个示例的偏移，不是默认分区。</p>
+<hr />
+<h2 id="7-esp-nvs-v1">7. <code>esp-nvs</code> —— 掉电不丢的键值存储（v1 完全漏掉，本版补全）</h2>
+<p>定位：ESP-IDF 兼容的裸机 NVS 库，Flash 上的数据格式与 ESP-IDF 互通
+（v4.0 起的多页 blob 格式；旧单页 blob 打开时迁移）；生产可用但作者
+自述“可能还有小毛病”；内部用 <code>unsafe</code> 转 C 结构体，靠 CRC32 校验。</p>
+<pre><code class="language-toml">esp-storage = { version = &quot;0.8&quot;, features = [&quot;esp32c3&quot;] }
+esp-nvs     = { version = &quot;0.5&quot;, features = [&quot;esp32c3&quot;] }
+</code></pre>
+<p>注意：另有升级记录出现 <code>esp-storage</code> 0.9.0 / 0.10.0，写文档前需以
+crates.io 为准核对最新版。</p>
+<h3 id="api-c-api">纠正：真实 API 长这样（不要照 C API 写）</h3>
+<p><code>NvsPartition::new</code> / <code>EspNvs</code> / <code>get_i32</code> / <code>set_i32</code> / <code>commit</code> 是
+<strong>ESP-IDF C API（<code>nvs_open</code> / <code>nvs_get_i32</code> / <code>nvs_set_i32</code> /
+<code>nvs_commit</code> / <code>nvs_erase_key</code>）和 std 路线 <code>esp-idf-svc</code>
+（<code>EspDefaultNvsPartition</code> / <code>EspNvs::new(partition, namespace, readwrite)</code>）</strong>
+的写法，<strong>不是 no_std <code>esp-nvs</code></strong>。两者不要混写进同一份文档。</p>
+<p>no_std <code>esp-nvs</code> 的真实 API（docs.rs 最新版源码已核对）：</p>
+<pre><code class="language-rust">let storage = esp_storage::FlashStorage::new(peripherals.FLASH);
+let mut nvs = esp_nvs::Nvs::new(0x9000, 0x6000, storage).expect(&quot;failed to create nvs&quot;);
+</code></pre>
+<p>构造：<code>Nvs::new(partition_offset: usize, partition_size: usize, hal: T)
+-&gt; Result&lt;Nvs&lt;T&gt;, Error&gt;</code>，其中 <code>T: Platform</code>（提供 Flash 访问 + CRC32）。
+打开时读遍全分区：解析命名空间、建每页哈希键缓存、清理重复条目 / 孤儿 blob；
+CRC 坏的页 / 条目标记损坏，必要时擦除。</p>
+<p>约束（源码已核对）：offset 必须是 4K 倍数，否则 <code>InvalidPartitionOffset</code>；
+size 必须是非零 4K 倍数且 <code>offset + size</code> 不超出 <code>hal.capacity()</code>，
+否则 <code>InvalidPartitionSize</code>；<strong>可写至少要 2 个扇区</strong>（一页写、一页留给
+碎片整理），少于 2 个时 <code>set</code> 报 <code>FlashFull</code>。</p>
+<h3 id="_17">命名空间与键</h3>
+<p>命名空间就是“文件夹”，防不同模块键名冲突；命名空间名和键名都
+<strong>最长 15 字符</strong>（<code>Key</code> 是 16 字节：15 字符 + <code>\0</code>，<code>MAX_KEY_LENGTH = 15</code>），
+一个分区最多 254 个命名空间；同名命名空间在不同分区算不同的。</p>
+<p><code>Key</code> 构造（已核实）：<code>Key::from_str("my_key")</code> /
+<code>Key::from_array(b"my_key")</code> / <code>Key::from_slice(b"my_key")</code>，
+建议用 <code>const { Key::from_str(...) }</code> 在编译期转换。</p>
+<h3 id="trait">读写（泛型方法 + trait）</h3>
+<pre><code class="language-rust">pub fn get&lt;R&gt;(&amp;mut self, namespace: &amp;Key, key: &amp;Key) -&gt; Result&lt;R, Error&gt;
+    where Nvs&lt;T&gt;: Get&lt;R&gt;
+pub fn set&lt;R&gt;(&amp;mut self, namespace: &amp;Key, key: &amp;Key, value: R) -&gt; Result&lt;(), Error&gt;
+    where Nvs&lt;T&gt;: Set&lt;R&gt;
+// trait 本体：Get::get(&amp;mut self, namespace: &amp;Key, key: &amp;Key) -&gt; Result&lt;T, Error&gt;
+//             Set::set(&amp;mut self, namespace: &amp;Key, key: &amp;Key, value: T) -&gt; Result&lt;(), Error&gt;
+</code></pre>
+<p>类型：<code>bool</code>、有 / 无符号整数到 64 位、<code>String</code>、<code>Vec&lt;u8&gt;</code>（即 <code>&amp;[u8]</code> blob）；
+<code>&amp;str</code> 单页、最大 4000 字节；blob 可跨多页、最大约 500 kB
+（源码注：<code>MAX_BLOB_SIZE - 1 = 507,999</code> 字节）；同键重写会替换旧值和旧类型，
+类型不匹配读时报错。</p>
+<p><strong><code>set</code> 就是“写即落盘”，全文检索 <code>Nvs</code> 页无 <code>commit</code></strong>——与 ESP-IDF C API
+的“先缓存、后 <code>nvs_commit()</code>”不同，<strong>不要照 C API 补 <code>commit</code></strong>。</p>
+<h3 id="_18">删除与清理</h3>
+<p><code>delete(&amp;mut self, namespace: &amp;Key, key: &amp;Key)</code>——<strong>忽略不存在的键 /
+命名空间</strong>（对应 C API 的 <code>nvs_erase_key</code>，但 Rust 侧无 <code>commit</code>）；
+<code>set_purge_mode(bool)</code> / <code>purge_mode()</code> / <code>purge_all(&amp;namespace)</code>
+（对标 ESP-IDF <code>NVS_READWRITE_PURGE</code>，物理清零已删数据，默认关闭）；
+另有 <code>namespaces()</code>、<code>keys()</code>、<code>typed_entries()</code>（产出
+<code>(namespace, key, ItemType)</code>）、<code>statistics()</code>、<code>into_inner()</code>（取回底层 Flash）。</p>
+<h3 id="esp_nvserrorerrornon_exhaustive15">错误表（<code>esp_nvs::error::Error</code>，<code>#[non_exhaustive]</code>，15 个变体）</h3>
+<p><code>InvalidPartitionOffset</code>、<code>InvalidPartitionSize</code>、<code>FlashError</code>、
+<code>NamespaceNotFound</code>、<code>NamespaceTooLong</code>、<code>NamespaceMalformed</code>、
+<code>ValueTooLong</code>、<code>KeyMalformed</code>、<code>KeyTooLong</code>、<code>KeyNotFound</code>、
+<code>ItemTypeMismatch(ItemType)</code>、<code>CorruptedData</code>、<code>FlashFull</code>、
+<code>TooManyNamespaces</code>、<code>PageFull</code>。
+文档原话：调用方一般只需处理 <code>NamespaceNotFound</code> 和 <code>KeyNotFound</code>。</p>
+<h3 id="_19">最小示例</h3>
+<pre><code class="language-rust">let storage = esp_storage::FlashStorage::new(peripherals.FLASH);
+let mut nvs = esp_nvs::Nvs::new(0x9000, 0x6000, storage).expect(&quot;failed to create nvs&quot;);
+let ns = const { esp_nvs::Key::from_str(&quot;config&quot;) };
+let key = const { esp_nvs::Key::from_str(&quot;boot_count&quot;) };
+let count: i32 = nvs.get(&amp;ns, &amp;key).unwrap_or(0);
+nvs.set(&amp;ns, &amp;key, count + 1).unwrap();
+let name: String = nvs.get(&amp;ns, &amp;const { esp_nvs::Key::from_str(&quot;name&quot;) }).unwrap_or_default();
+nvs.delete(&amp;ns, &amp;key).unwrap(); // 无 commit，不要照 C API 补 commit
+</code></pre>
+<p>注意：<code>get::&lt;String&gt;</code> / <code>get::&lt;Vec&lt;u8&gt;&gt;</code> 的具体行为（空串、缺省）未在示例中
+核实，<code>unwrap_or_default</code> 只是示意；<code>use esp_nvs::{Get, Set}</code> 是否必需
+未核实——方法本身是 inherent 方法，trait 导入可能不需要，写代码时不要
+硬写导入行，先看编译器提示。</p>
+<hr />
+<h2 id="8-esp-radio-wi-fibleesp-now-esp-wifi">8. <code>esp-radio</code> —— Wi-Fi、BLE、ESP-NOW（原 <code>esp-wifi</code>）</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>Wi-Fi, BLE, IEEE 802.15.4, and ESP-NOW functionality for Espressif devices.</p>
+</blockquote>
+<p>中文：面向 Espressif 设备的 Wi-Fi、BLE、IEEE 802.15.4 和 ESP-NOW 功能。
+<strong>C3 没有 802.15.4 射频，Zigbee / Thread / Matter-over-Thread 都做不了</strong>，
+软件升级也补不出来；要原生 Zigbee/Thread 请换 C6 / H2。
+<code>esp-radio</code> 的 <code>ieee802154</code> feature 只在有该射频的芯片（C6/H2 等）上
+有意义，且不能和 Wi-Fi 同时用。</p>
+<h3 id="_20">翻译详解</h3>
+<p>这是 1.x 生态里无线部分的统一入口。老教程里写的 <code>esp-wifi</code>
+在 1.x 里已经改名、重组为 <code>esp-radio</code>，看到老教程不要直接照抄
+crate 名，先确认它对应的是哪个版本线。</p>
+<p>它包含三类 C3 可用的能力（不同芯片支持情况不同，查文档时先对芯片）：</p>
+<ul>
+<li><strong>Wi-Fi</strong>：Station（连路由器）和 Access Point（自己开热点）两种模式；</li>
+<li><strong>BLE</strong>：低功耗蓝牙，通过 <code>BleConnector</code> 给 <code>trouble-host</code> 这类
+  HCI 蓝牙主机做传输层；C3 只有 BLE 5.0，<strong>无经典蓝牙</strong>；</li>
+<li><strong>ESP-NOW</strong>：无连接、低功耗的点对点通信，适合设备之间直接传小数据。</li>
+</ul>
+<p><strong><code>esp-radio</code> 本身不提供 TCP/IP、HTTP、TLS</strong>：它只给 Wi-Fi / BLE /
+ESP-NOW 的 L2 驱动，TCP/IP、DHCP、DNS 要靠 <code>embassy-net</code>
+（底层历史上是 <code>smoltcp</code>；近期 embassy 侧有提到改用 <code>xarxa</code> 引擎，
+C3 官方例子用的版本是否已切过去<strong>未核实</strong>，落版本时以你锁定的
+<code>embassy-net</code> 文档为准）。</p>
+<h3 id="crate_1">前置条件：比前面几个 crate 都重</h3>
+<p>Wi-Fi 和 BLE 要在后台持续跑协议栈（定时器、中断、状态机），
+因此必须同时满足：</p>
+<ol>
+<li><strong>堆</strong>：用 <code>esp-alloc</code> 先初始化堆，协议栈要动态分配；</li>
+<li><strong>调度器</strong>：用 <code>esp-rtos</code>（或等价的 <code>esp-radio-rtos-driver</code> 实现）
+   给协议栈提供调度，IEEE 802.15.4 不需要调度器是个例外（C3 无关）；</li>
+<li><strong>网络协议栈（如果要 TCP/IP）</strong>：<code>esp-radio</code> 本身只给到无线驱动层，
+   TCP/IP、DHCP、DNS 要接 <code>embassy-net</code>（基于 smoltcp），
+   再由 <code>embassy-net</code> 把 <code>esp-radio</code> 的 Wi-Fi 接口当作网卡用。</li>
+</ol>
+<p>一句话：<code>esp-hal</code> 是手，<code>esp-alloc</code> 是内存，<code>esp-rtos</code> 是心跳，
+<code>esp-radio</code> 是无线电，<code>embassy-net</code> 是 TCP/IP 脑子，缺一个都跑不起来。
+radio 的二进制 blob 要求优化等级 O2/O3，debug 构建需在 <code>Cargo.toml</code>
+里给 <code>esp-radio</code> 单独提优化等级。</p>
+<h3 id="81-wi-fi">8.1 初始化与 Wi-Fi 入口</h3>
+<p>已核实的两套写法（版本不同，二选一）：</p>
+<pre><code class="language-rust">// 0.16–0.18 常见写法
+let radio_init = esp_radio::init().expect(&quot;radio init&quot;);
+let (wifi_controller, interfaces) =
+    esp_radio::wifi::new(&amp;radio_init, peripherals.WIFI, Default::default()).unwrap();
+let wifi_interface = interfaces.sta; // 0.18 用 interfaces.station / Interface 类型
+</code></pre>
+<pre><code class="language-rust">// Rust on ESP Book 当前写法（1.x 方向）
+let (mut controller, interfaces) = esp_radio::wifi::new(
+    peripherals.WIFI,
+    ControllerConfig::default().with_initial_config(station_config),
+).unwrap();
+let wifi_interface = interfaces.station;
+</code></pre>
+<p>要点：<code>esp_radio::init()</code> 返回 <code>esp_radio::Controller&lt;'static&gt;</code>，
+一般用 <code>mk_static!</code> / <code>StaticCell</code> 提升为 <code>'static</code> 再交给后台任务；
+<code>wifi::new</code> 返回 <code>(WifiController, Interfaces)</code>，STA 口是 <code>interfaces.sta</code>
+（旧）/ <code>interfaces.station</code>（新），AP 口对应 <code>interfaces.ap</code>。
+旧版里接口类型叫 <code>WifiDevice</code> / <code>WifiStaDevice</code> / <code>WifiApDevice</code>，
+0.18 里叫 <code>esp_radio::wifi::Interface</code>——<strong>不要混用这两个名字</strong>。</p>
+<h3 id="82-wificontroller">8.2 <code>WifiController</code>：方法与阻塞 / 异步</h3>
+<p><code>esp_radio::wifi::WifiController&lt;'d&gt;</code>，已在 0.16 文档核实：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>性质</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>set_config(&amp;ModeConfig / &amp;Config)</code></td>
+<td>设模式；传 <code>ModeConfig::None</code> / <code>Config</code> 的空变体可关掉 STA+AP</td>
+</tr>
+<tr>
+<td><code>start()</code> / <code>start_async().await</code></td>
+<td>非阻塞 / 等到启动完成；之后用 <code>is_started()</code> 查</td>
+</tr>
+<tr>
+<td><code>stop()</code> / <code>stop_async().await</code></td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>connect()</code> / <code>connect_async().await</code></td>
+<td><code>connect()</code> 本身<strong>不阻塞</strong>，要轮询 <code>is_connected()</code>；<code>connect_async()</code> 等到连上才返回</td>
+</tr>
+<tr>
+<td><code>disconnect()</code> / <code>disconnect_async().await</code></td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>scan_with_config(ScanConfig)</code> / <code>scan_with_config_async(ScanConfig).await</code></td>
+<td>阻塞扫描 / 异步扫描；<code>ScanConfig::default().with_max(10)</code></td>
+</tr>
+<tr>
+<td><code>wait_for_event(WifiEvent)</code></td>
+<td>等一个或多个事件，返回发生的事件</td>
+</tr>
+<tr>
+<td><code>is_started()</code>、<code>is_connected()</code>、<code>capabilities()</code>、<code>get_rssi()</code>、<code>set_protocol(Protocol)</code>、<code>set_power_saving(...)</code></td>
+<td>查询 / 设置；<code>get_rssi()</code> 只在 STA 或 AP-STA 模式、连上之后用，AP-only 时报 <code>WifiError::Unsupported</code>；<code>set_protocol</code> 默认 <code>WIFI_PROTOCOL_11B \| WIFI_PROTOCOL_11G \| WIFI_PROTOCOL_11N</code>，须在 <code>set_config</code> 之后调</td>
+</tr>
+</tbody>
+</table>
+<p>注意：Book 里还出现 <code>controller.scan_async(&amp;scan_config).await</code>、
+<code>controller.wait_for_disconnect_async().await</code>、
+<code>esp_radio::wifi::sta_state()</code> + <code>WifiStaState::Connected</code>，这些在 0.16 的
+<code>WifiController</code> 页里<strong>没有列出</strong>，属于新版 / 教程写法，落版本时以你锁定的
+版本文档为准，不要当成 0.16 的 API。</p>
+<h3 id="83-sta-ap">8.3 STA / AP 模式</h3>
+<p>模式枚举（版本不同，两个名字）：</p>
+<pre><code class="language-rust">// 0.16–0.17
+ModeConfig::Client(ClientConfig) / ModeConfig::AccessPoint(AccessPointConfig)
+// 1.0.0-beta.0（C3 预览页，已打开）
+Config::Station(StationConfig)
+Config::AccessPoint(AccessPointConfig)
+Config::AccessPointStation(StationConfig, AccessPointConfig)
+Config::EapStation(EapStationConfig) // 需 wifi-eap feature，企业 Wi-Fi
+</code></pre>
+<ul>
+<li><strong>STA</strong>：<code>StationConfig::default().with_ssid(SSID).with_password(PASSWORD.into())</code>
+  （Book 写法）；旧版是 <code>ClientConfig::default().with_ssid(...).with_password(...)</code> +
+  <code>ModeConfig::Client(...)</code>。连上后 <code>embassy-net</code> 再 DHCP 取 IP。</li>
+<li><strong>AP（Soft-AP）</strong>：<code>AccessPointConfig</code> 字段（0.16 C3 页已核实）：
+  <code>ssid</code>、<code>ssid_hidden</code>、<code>channel</code>、<code>secondary_channel</code>、<code>protocols</code>、
+  <code>auth_method</code>、<code>password</code>、<code>max_connections</code>、<code>dtim_period</code>（1~10）、
+  <code>beacon_timeout</code>（<code>unstable</code> feature）。</li>
+<li><strong>AP-STA</strong>：同时做 AP 又连上游 AP；AP 口通常配静态 IP，STA 口走 DHCP。</li>
+</ul>
+<p><code>WifiEvent</code>（0.16 页，已核实，<code>#[non_exhaustive]</code>，共 45 个变体）：
+<code>WifiReady</code>、<code>ScanDone</code>、<code>StaStart</code>、<code>StaStop</code>、<code>StaConnected</code>、
+<code>StaDisconnected</code>、<code>ApStaConnected</code>、<code>ApStaDisconnected</code> 等。
+典型断线重连就是 <code>controller.wait_for_event(WifiEvent::StaDisconnected).await</code>
+后再 <code>connect_async()</code>。</p>
+<h3 id="84">8.4 断线重连任务（异步版，典型写法）</h3>
+<pre><code class="language-rust">#[embassy_executor::task]
+async fn connection(mut controller: WifiController&lt;'static&gt;) {
+    loop {
+        // 按版本二选一：set_config(Client/Station) 后 start_async + connect_async
+        // 或按 Book：controller.connect_async().await 后
+        // controller.wait_for_disconnect_async().await
+        if controller.connect_async().await.is_ok() {
+            controller.wait_for_event(WifiEvent::StaDisconnected).await;
+        }
+        Timer::after(Duration::from_secs(5)).await;
+    }
+}
+</code></pre>
+<hr />
+<h2 id="9-ble-esp-nowc3">9. BLE 与 ESP-NOW（C3）</h2>
+<h3 id="91-blebleconnector-trouble-host">9.1 BLE：<code>BleConnector</code> + trouble-host</h3>
+<p><code>esp-radio</code> 的 BLE 部分<strong>只提供 HCI 传输</strong>，不提供 GATT 本身：</p>
+<ul>
+<li><code>esp_radio::ble::BleConnector</code>（需 <code>ble</code> feature + <code>coex</code>）：
+  实现 <code>bt-hci</code> 的 HCI transport，底层是 NimBLE Porting Layer。</li>
+<li>上层用 <strong><code>trouble-host</code></strong>（纯 Rust、no_std、Embassy 原生）：
+  <code>trouble_host::prelude::*</code>，<code>ExternalController&lt;BleConnector, N&gt;</code>
+  （<code>bt-hci</code> 的 <code>ExternalController</code>，<code>N</code> 为包池大小）、
+  <code>HostResources</code> / <code>Host</code> / <code>Runner</code>。</li>
+<li>GATT 用宏定义：</li>
+</ul>
+<pre><code class="language-rust">#[gatt_server]
+struct Server { sensor_service: SensorService }
+
+#[gatt_service(uuid = &quot;a9c81b72-0f7a-4c59-b0a8-425e3bcf0a0e&quot;)]
+struct SensorService {
+    #[characteristic(uuid = &quot;13c0ef83-09bd-4767-97cb-ee46224ae6db&quot;, read, notify)]
+    sensor_data: u8,
+    #[characteristic(uuid = &quot;c79b2ca7-f39d-4060-8168-816fa26737b7&quot;, write, read)]
+    sensor_settings: bool,
+}
+</code></pre>
+<ul>
+<li>广播：<code>trouble_host::advertise::{AdStructure, Advertisement}</code>，如
+  <code>AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED)</code>、
+  <code>AdStructure::ServiceUuids128(&amp;[…])</code>、
+  <code>AdStructure::CompleteLocalName("…")</code>。</li>
+<li>典型规模：<code>CONNECTIONS_MAX: usize = 1</code>、<code>L2CAP_CHANNELS_MAX: usize = 1</code>
+  （C3 单连接例子）；后台要同时跑 <code>Runner</code>（host 事件循环）和广播 /
+  连接处理循环，常用 <code>embassy_futures::join::join</code> 或 <code>select</code> 拼。</li>
+<li><strong>未核实</strong>：<code>trouble_host::new(…)</code> / <code>Host::new(…)</code> / <code>Runner::run()</code>
+  的确切签名在本次打开的页面里没有完整给出（只核实了 <code>prelude</code> 导出
+  <code>ExternalController</code>、<code>Runner</code>、<code>gatt_server</code> / <code>gatt_service</code> 宏），
+  写代码时以你锁定的 <code>trouble-host</code> 版本文档为准。L2CAP CoC 在
+  <code>trouble-host</code> 里当时不稳定，不要当成已可用的 API。</li>
+</ul>
+<h3 id="92-esp-now">9.2 ESP-NOW</h3>
+<p><code>esp_radio::esp_now::EspNow&lt;'d&gt;</code>，需 <code>esp-now</code> feature（依赖 <code>wifi</code>），且
+<strong>整个 API 标记为 <code>unstable</code></strong>，需 <code>unstable</code> feature，无 SemVer 保证。</p>
+<p>已核实（0.16 页）：</p>
+<ul>
+<li><code>split()</code>：拆成 manager / sender / receiver 三部分。</li>
+<li><code>add_peer(…)</code> / <code>remove_peer(…)</code> / <code>modify_peer(…)</code> / <code>get_peer(…)</code> /
+  <code>fetch_peer(…)</code> / <code>is_peer_known(…)</code> / <code>peer_count()</code>；发送前必须先 <code>add_peer</code>。</li>
+<li><code>send(…)</code>：发给指定 peer；<code>receive(…)</code>：异步收，返回的 future
+  <strong>不要在 ready 前 drop</strong>，否则会拿到错误的发送状态。</li>
+<li><code>set_channel(…)</code>：只在不用 AP/STA 时用；<code>set_primary_master_key(…)</code>、
+  <code>get_version()</code>、<code>set_rate(…)</code>、wake window 设置。</li>
+<li>默认已在 STA 口上加了一个广播 peer；单包最大 <strong>250 字节</strong>；
+  收发双方须在同一 Wi-Fi 信道。</li>
+</ul>
+<hr />
+<h2 id="10-esp-rtos-embassy">10. <code>esp-rtos</code> —— 给无线和 Embassy 的调度器</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>Scheduler implementation for esp-radio, embassy support for <code>esp-hal</code>.</p>
+</blockquote>
+<p>中文：面向 <code>esp-radio</code> 的调度器实现，同时为 <code>esp-hal</code> 提供 Embassy 支持。</p>
+<h3 id="_21">翻译详解</h3>
+<p><code>esp-rtos</code> 是 <code>esp-radio</code> 默认搭售的调度后端：它实现了
+<code>esp-radio-rtos-driver</code> 定义的调度与运行时接口，让无线协议栈
+能在后台可靠地跑起来。<code>esp-generate</code> 在你勾选 Wi-Fi 等模板选项时，
+会自动把 <code>esp-rtos</code> 加进来，一般不用手动再配一遍。</p>
+<p>对 Embassy 工程来说，它同时承担了时间驱动的角色：
+Embassy 的 <code>Timer::after(…).await</code>、<code>Timer::at(…).await</code>
+这类异步延时，最终要落到一个能被调度的定时器上，
+<code>esp-rtos</code> 就是把 <code>esp-hal</code> 的定时器和 Embassy 的时间驱动接起来的那层。</p>
+<p>老教程里常见的 <code>esp-hal-embassy</code> 是更早的接法，
+在 1.x 的新工程里请优先按 <code>esp-rtos</code> 的路线走，
+不要把两套调度器混在一个工程里。</p>
+<h3 id="_22">启动</h3>
+<pre><code class="language-rust">use esp_hal::timer::timg::TimerGroup;
+let timg0 = TimerGroup::new(peripherals.TIMG0);
+esp_rtos::start(timg0.timer0); // 0.2.0 文档写法
+// Rust on ESP Book / 新版写法：
+// esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+// 其中 sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+</code></pre>
+<ul>
+<li><code>esp_rtos::start(…)</code>：启动调度器；<code>start_with_idle_hook(…)</code>：
+  带自定义 idle hook；<code>start_second_core(…)</code> /
+  <code>start_second_core_with_stack_guard_offset(…)</code>：
+  <strong>只给双核芯片，C3 是单核，不要调</strong>。</li>
+<li>顺序：<code>esp_hal::init</code> → <code>esp_rtos::start</code> → <code>esp_radio::init</code> → <code>wifi::new</code>。</li>
+<li>配置项（0.2.0 页）：<code>ESP_RTOS_CONFIG_TICK_RATE_HZ</code>（默认 100 Hz，
+  不稳定配置）等。</li>
+<li>Feature（0.2.0 页）：<code>embassy</code>（Embassy 集成：时间驱动 + 执行器）、
+  <code>esp-radio</code>、<code>esp-alloc</code>（<code>esp-radio</code> 需要堆分配；不开它就要自己提供
+  <code>malloc_internal</code> / <code>free_internal</code>）、<code>log-04</code> / <code>defmt</code>，
+  芯片选 <code>esp32c3</code>。</li>
+</ul>
+<h3 id="embassy-executor">和 embassy-executor 的关系</h3>
+<ul>
+<li>写 async 要开 <code>embassy</code> feature，入口用 <strong><code>#[esp_rtos::main]</code></strong>，
+  它会创建一个 <code>esp_rtos::embassy::Executor</code>（主线程上的 thread-mode executor），
+  并把 <code>main</code> 体作为一个 async 任务 spawn。</li>
+<li>任务本身用 <code>embassy-executor</code> 的 <code>#[embassy_executor::task]</code> 宏；
+  文档明确：<strong>不要给 <code>embassy-executor</code> 开任何 <code>arch-*</code> feature</strong>。</li>
+<li>不要把 <code>#[esp_rtos::main]</code> 和旧 <code>esp-hal-embassy</code> 的
+  <code>#[embassy_executor::main]</code> 混用——1.x 线用前者。</li>
+</ul>
+<hr />
+<h2 id="11-embassy-net-embassy-c3">11. <code>embassy-net</code> 与 Embassy 异步链路（C3）</h2>
+<h3 id="111-stack-runner">11.1 Stack / Runner / 资源</h3>
+<pre><code class="language-rust">use embassy_net::{Config, DhcpConfig, StackResources, Runner};
+use static_cell::StaticCell;
+
+static RESOURCES: StaticCell&lt;StackResources&lt;3&gt;&gt; = StaticCell::new();
+let (stack, runner) = embassy_net::new(
+    wifi_interface,                 // esp-radio 的 STA/AP 接口
+    Config::dhcpv4(DhcpConfig::default()), // 或 Config::dhcpv4(Default::default())，看版本
+    RESOURCES.init(StackResources::new()),
+    seed,                           // u64，一般用 RNG 拼出来
+);
+</code></pre>
+<ul>
+<li><code>embassy_net::new(device, config, resources, seed) -&gt; (Stack, Runner)</code>。
+  <code>Runner</code> 是引擎，必须单独开一个任务跑 <code>runner.run().await</code> 到底
+  （<code>net_task</code>），否则一切网络都不工作；<code>Stack</code> 是轻量 <code>Copy</code> 句柄，
+  可以传值给各个任务去开 socket / 查 IP。</li>
+<li><code>StackResources&lt;3&gt;</code> 的 <code>3</code> 是 socket 槽位数：DHCP 占 1、DNS 占 1、
+  应用再占 1；多开 socket 就要加大。</li>
+<li><code>Config</code>：<code>Config::dhcpv4(…)</code>（DHCPv4）或
+  <code>Config::ipv4_static(StaticConfigV4 { address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 1, 10), 24), dns_servers: Vec::new(), gateway: Some(Ipv4Address::new(192, 168, 1, 1)) })</code>。
+  AP 口一般用后者。</li>
+<li><code>Stack</code> 方法（docs.rs <code>Stack</code> 页已核实）：<code>is_link_up()</code>、
+  <code>is_config_up()</code>、<code>wait_link_up()</code> / <code>wait_link_down()</code>、
+  <code>wait_config_up()</code> / <code>wait_config_down()</code>（DHCP 拿不到 IP 时可能永不返回，
+  调用方自己加超时）、<code>config_v4()</code> / <code>config_v6()</code>、
+  <code>set_ipv4_config(…)</code>、<code>dns_query(…)</code>、<code>hardware_address()</code>、
+  <code>join_multicast_group(…)</code> / <code>leave_multicast_group(…)</code>。</li>
+</ul>
+<h3 id="112-tcpsocket-udpsocket-dnssocket">11.2 TcpSocket / UdpSocket / DnsSocket</h3>
+<p><strong><code>embassy_net::tcp::TcpSocket</code></strong>（需 <code>tcp</code> feature）：</p>
+<pre><code class="language-rust">let mut rx_buffer = [0u8; 1024];
+let mut tx_buffer = [0u8; 1024];
+let mut socket = TcpSocket::new(stack, &amp;mut rx_buffer, &amp;mut tx_buffer);
+socket.set_timeout(Some(Duration::from_secs(10)));
+socket.connect((Ipv4Address::new(192, 168, 1, 1), 8000)).await?; // 客户端
+socket.accept(80).await?;                                          // 服务端：没有 TcpListener，
+// 每个 TcpSocket 自己 accept() 进入监听；想同时接多个客户端就多建几个 socket
+let n = socket.read(&amp;mut buf).await?;
+socket.write_all(response).await?; // embedded-io-async::Write
+socket.flush().await?;
+socket.close(); // 只关写半边；abort() 是强制关
+</code></pre>
+<p>还可 <code>split()</code> 成 <code>TcpReader</code> / <code>TcpWriter</code>，各有 <code>read</code> / <code>write</code> / <code>flush</code>。
+<code>read</code> 返回 <code>Ok(0)</code> 表示对端已关。</p>
+<p><strong><code>embassy_net::udp::UdpSocket</code></strong>：<code>UdpSocket::new(stack, &amp;mut rx_meta,
+&amp;mut rx_buffer, &amp;mut tx_meta, &amp;mut tx_buffer)</code>（<code>rx_meta</code> / <code>tx_meta</code>
+是 <code>PacketMetadata</code> 数组），<code>bind(endpoint)</code>（端口传 <code>0</code> 会自动分配），
+<code>recv_from(&amp;mut buf).await -&gt; (usize, IpEndpoint)</code>，
+<code>send_to(&amp;buf, remote_endpoint).await</code>。</p>
+<p><strong>DNS</strong>：Book 的 HTTP 例子用 <code>DnsSocket::new(stack)</code> 配合 <code>reqwless</code> 的
+<code>HttpClient</code>；<code>Stack</code> 本身也有 <code>dns_query(…)</code>。另外 Book 里 <code>reqwless</code>
+用的不是裸 <code>TcpSocket</code>，而是 <code>embassy_net::tcp::client::TcpClient::new(stack,
+mk_static!(TcpClientState&lt;1, 1500, 1500&gt;, …))</code>——这是 <code>reqwless</code> 客户端的
+配套写法，<strong>未在 docs.rs 的 <code>TcpSocket</code> 页核实</strong>，用 <code>reqwless</code> 时再对版本。</p>
+<h3 id="113-wi-fi-tcp">11.3 最小异步 Wi-Fi + TCP 骨架（代码草图）</h3>
+<p>以下按 Book + Molloy 的结构综合，名字都是上面核实过的；
+<code>Config</code> / <code>Interfaces</code> 的字段名按你锁定的版本二选一（见 8.1 节）：</p>
+<pre><code class="language-rust">#![no_std]
+#![no_main]
+use embassy_executor::Spawner;
+use embassy_net::{Config, DhcpConfig, Runner, Stack, StackResources};
+use embassy_time::{Duration, Timer};
+use esp_radio::wifi::{WifiController, WifiEvent};
+use static_cell::StaticCell;
+
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -&gt; ! {
+    let peripherals = esp_hal::init(esp_hal::Config::default());
+    let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timg0.timer0); // 新版可能要加 software interrupt 参数，见 10 章
+    // esp_alloc::heap_allocator!(...); // esp-radio 需要堆，先配好
+    let radio = &amp;*mk_static!(esp_radio::Controller&lt;'static&gt;, esp_radio::init().unwrap());
+    let (controller, interfaces) =
+        esp_radio::wifi::new(radio, peripherals.WIFI, Default::default()).unwrap();
+    // Book 1.x 写法：wifi::new(peripherals.WIFI,
+    //   ControllerConfig::default().with_initial_config(Config::Station(...)))
+
+    static RESOURCES: StaticCell&lt;StackResources&lt;3&gt;&gt; = StaticCell::new();
+    let seed = /* RNG 拼出的 u64 */;
+    let (stack, runner) = embassy_net::new(
+        interfaces.sta, // 新版 interfaces.station
+        Config::dhcpv4(DhcpConfig::default()),
+        RESOURCES.init(StackResources::new()),
+        seed,
+    );
+    spawner.spawn(connection(controller)).unwrap(); // 版本不同 spawn 形态见 2.5 节
+    spawner.spawn(net_task(runner)).unwrap();
+    stack.wait_config_up().await;
+    // 这里 stack 已拿到 IP，可再 spawn 一个用 TcpSocket 的任务
+    loop { Timer::after(Duration::from_secs(60)).await; }
+}
+
+#[embassy_executor::task]
+async fn connection(mut controller: WifiController&lt;'static&gt;) {
+    loop {
+        if controller.connect_async().await.is_ok() {
+            controller.wait_for_event(WifiEvent::StaDisconnected).await;
+        }
+        Timer::after(Duration::from_secs(5)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn net_task(mut runner: Runner&lt;'static, esp_radio::wifi::Interface&lt;'static&gt;&gt;) -&gt; ! {
+    runner.run().await // 旧版类型是 Runner&lt;'static, WifiDevice&lt;'static&gt;&gt;
+}
+</code></pre>
+<p>注意：<code>net_task</code> 的 <code>Runner</code> 泛型在 0.16–0.17 是 <code>WifiDevice&lt;'static&gt;</code>，
+0.18 是 <code>Interface&lt;'static&gt;</code>；<code>spawner.spawn(…)</code> 在有的版本返回 <code>Result</code>
+要 <code>.unwrap()</code>，有的版本直接返回 token 或用 <code>must_spawn</code>——编译器报错会
+直接告诉你该用哪种。</p>
+<hr />
+<h2 id="12-esp-bootloader-esp-idf-ota">12. <code>esp-bootloader-esp-idf</code> —— 启动描述和 OTA</h2>
+<p>原文一句话：</p>
+<blockquote>
+<p>Offers additional support for the ESP-IDF 2nd stage bootloader, including OTA.</p>
+</blockquote>
+<p>中文：为 ESP-IDF 二级 bootloader 提供额外支持，包括 OTA。</p>
+<h3 id="_23">翻译详解</h3>
+<p>现在的 <code>no_std</code> 工程大多仍用 ESP-IDF 的二级 bootloader 来启动，
+这个 bootloader 要求固件里嵌一小块应用描述信息（版本、名称、
+编译时间等元数据）。<code>esp-bootloader-esp-idf</code> 就是提供这块信息的 crate，
+用法是在 crate 根部调用一次宏：</p>
+<pre><code class="language-rust">esp_bootloader_esp_idf::esp_app_desc!();
+</code></pre>
+<p>漏了它会发生什么，是新手最容易卡住的地方之一：
+程序能编译、能烧录，但板子就是不启动，而且编译阶段没有任何报错，
+因为缺的只是一块启动时要读的元数据。从 <code>espflash</code> v4 起，
+预置的 ESP-IDF bootloader 对这块描述的要求更严格，
+所以官方示例里这一行是必备的，不要删。</p>
+<p>它还提供 OTA（空中升级）相关的支持：配合分区表里的 OTA 数据区，
+可以实现“下载新固件到备用分区、下次启动切过去”的升级流程，
+具体分区和流程要按 ESP-IDF 的 OTA 文档来配，不是只加一个依赖就自动有的。
+双 OTA 分区表见第 6 章。</p>
+<hr />
+<h2 id="13-cratec3">13. 原来完全没进翻译单的 crate（C3 用户一定会碰到）</h2>
+<table>
+<thead>
+<tr>
+<th>crate</th>
+<th>一句话用途 / C3 何时需要</th>
+<th>Cargo.toml（C3）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>esp-nvs</code></td>
+<td>裸机 NVS 键值持久化（Wi-Fi 配置、计数器、校准）</td>
+<td>见第 7 章；<code>features = ["esp32c3"]</code></td>
+</tr>
+<tr>
+<td><code>embassy-net</code></td>
+<td>Embassy 的 TCP/IP 栈（底层 smoltcp），Wi-Fi 联网必备</td>
+<td><code>embassy-net = { version = "0.9", features = ["tcp", "udp", "dhcpv4", "dns", "medium-ethernet"] }</code>（feature 名未逐项核实，以 docs.rs 为准）</td>
+</tr>
+<tr>
+<td><code>embassy-executor</code></td>
+<td>Embassy 异步执行器，<code>#[embassy_executor::task]</code> + <code>Spawner</code></td>
+<td><code>embassy-executor = "0.10"</code>；<strong>注意：esp-rtos 文档明确说不要自己开 <code>arch-*</code> feature</strong>，用 esp-rtos 提供的执行器时以 esp-rtos 文档为准</td>
+</tr>
+<tr>
+<td><code>embassy-time</code></td>
+<td><code>Timer::after(Duration::from_secs(1)).await</code>、超时、周期任务</td>
+<td><code>embassy-time = "0.5"</code>（无芯片 feature；时间驱动由 <code>esp-rtos</code> 提供）</td>
+</tr>
+<tr>
+<td><code>embassy-sync</code></td>
+<td>任务间 <code>Mutex</code> / <code>Channel</code> / <code>Signal</code> / <code>PubSubChannel</code>，代替 <code>std::sync</code></td>
+<td><code>embassy-sync = "0.8"</code></td>
+</tr>
+<tr>
+<td><code>embassy-futures</code></td>
+<td><code>select</code>（先完成者胜）/ <code>join</code>（等全部完成）等 future 组合子</td>
+<td><code>embassy-futures = "0.1"</code>（版本号未核实）</td>
+</tr>
+<tr>
+<td><code>trouble-host</code>（TrouBLE）</td>
+<td>纯 Rust BLE Host（GATT server/client），配 <code>esp-radio</code> 的 <code>BleConnector</code></td>
+<td><code>trouble-host = { version = "0.6", features = ["default-packet-pool-mtu-255"] }</code>（0.6 为 2026-04 实测版；另有 0.8 的升级记录，<strong>未核实最新版</strong>）</td>
+</tr>
+<tr>
+<td><code>embedded-hal</code> / <code>embedded-hal-async</code></td>
+<td>外设 trait 标准（GPIO / I2C / SPI / UART 的 <code>embedded-hal</code> trait，<code>esp-hal</code> 驱动已实现；写跨芯片驱动时用）</td>
+<td><code>embedded-hal = "1.0"</code>；<code>embedded-hal-async = "1.0"</code>（具体小版本未核实）</td>
+</tr>
+<tr>
+<td><code>embedded-io</code> / <code>embedded-io-async</code></td>
+<td><code>no_std</code> 版 <code>Read</code> / <code>Write</code> trait</td>
+<td><code>embedded-io = "0.6"</code>（版本未核实）</td>
+</tr>
+<tr>
+<td><code>embedded-storage</code></td>
+<td><code>ReadNorFlash</code> / <code>NorFlash</code> / <code>ReadStorage</code> / <code>Storage</code> trait，<code>esp-storage</code> 的实现对象</td>
+<td><code>embedded-storage = "0.3"</code>（版本未核实）</td>
+</tr>
+<tr>
+<td><code>smoltcp</code></td>
+<td>底层 TCP/IP 协议栈；<strong>C3 用户一般不直接依赖</strong>，经 <code>embassy-net</code> 间接使用</td>
+<td>不直接写；<code>embassy-net</code> 会带</td>
+</tr>
+<tr>
+<td><code>esp-config</code></td>
+<td>编译期配置系统（<code>ESP_*_CONFIG_*</code> 环境变量，如 <code>ESP_HAL_CONFIG_*</code>）</td>
+<td>由 esp-hal 传递，一般不直接依赖；版本未核实</td>
+</tr>
+<tr>
+<td><code>esp-sync</code></td>
+<td>esp 的同步原语（critical-section 等），esp-hal/esp-radio 的底层依赖</td>
+<td>由 esp-hal 传递，一般不直接依赖；<code>features = ["esp32c3"]</code> 仅在直接依赖时</td>
+</tr>
+<tr>
+<td><code>esp-preempt</code></td>
+<td>线程与线程感知同步原语，主要给 <code>esp-radio</code> 用</td>
+<td>由 esp-radio 传递，一般不直接依赖</td>
+</tr>
+<tr>
+<td><code>esp-hal-proc-macros</code></td>
+<td>过程宏：<code>#[main]</code>、<code>#[handler]</code>、<code>#[ram]</code>、<code>#[esp_rtos::main]</code>；<strong>crates.io 上叫 <code>esp-hal-procmacros</code>，一般不要直接依赖</strong>，由 <code>esp-hal</code> / <code>esp-rtos</code> 重导出：<code>esp_hal::{main, handler, ram}</code>、<code>esp_rtos::main</code></td>
+<td>不直接写；<code>#[handler(priority = esp_hal::interrupt::Priority::Priority2)]</code> 为中断处理函数写法（已核实）</td>
+</tr>
+<tr>
+<td><code>esp-riscv-rt</code></td>
+<td>RISC-V 最小启动 / 运行时（向量表、复位入口），C3 的底层</td>
+<td>由 esp-hal 传递，一般不直接依赖</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="14-crate-c3">14. 辅助 crate 速查表（翻译版，C3 视角）</h2>
+<p>以下来自《Rust on ESP Book》官方表，中文为翻译，稳定性为官方标注。
+C3 上不存在的已在第 1 章列出，不再重复。</p>
+<table>
+<thead>
+<tr>
+<th>crate</th>
+<th>中文含义</th>
+<th>稳定性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>esp-alloc</code></td>
+<td>内存分配工具</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-backtrace</code></td>
+<td>调用栈支持</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-bootloader-esp-idf</code></td>
+<td>ESP-IDF 二级 bootloader 支持，含 OTA</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-build</code></td>
+<td>构建脚本里用的构建工具，供 <code>esp-hal</code> 及相关包使用</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-config</code></td>
+<td>配置系统</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-hal</code></td>
+<td>面向所有 Espressif ESP32 设备的裸机 <code>no_std</code> HAL</td>
+<td>Stable*</td>
+</tr>
+<tr>
+<td><code>esp-hal-proc-macros</code></td>
+<td>供 <code>esp-hal</code> 家族使用的过程宏</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-lp-hal</code></td>
+<td>面向部分芯片上低功耗 / 超低功耗核的裸机 HAL（<strong>C3 无 LP 核，与 C3 无关</strong>）</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-metadata</code></td>
+<td>Espressif 设备元数据，主要供构建脚本使用</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-preempt</code></td>
+<td>线程与线程感知同步原语，主要供 <code>esp-radio</code> 使用</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-println</code></td>
+<td>打印与日志功能</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-riscv-rt</code></td>
+<td>面向 Espressif RISC-V CPU 的最小启动 / 运行时</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-rom-sys</code></td>
+<td>ROM 代码支持</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-rtos</code></td>
+<td><code>esp-radio</code> 的调度器实现，<code>esp-hal</code> 的 Embassy 支持</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-sync</code></td>
+<td>面向 Espressif 设备的同步原语</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-storage</code></td>
+<td>存储工具</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-nvs</code></td>
+<td>ESP-IDF 兼容的 NVS 键值存储</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>esp-radio</code></td>
+<td>Wi-Fi、BLE、IEEE 802.15.4、ESP-NOW 功能（<strong>C3 无 802.15.4</strong>）</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>xtensa-lx</code></td>
+<td>Xtensa LX 处理器与外设的底层访问（<strong>C3 是 RISC-V，与 C3 无关</strong>）</td>
+<td>Unstable</td>
+</tr>
+<tr>
+<td><code>xtensa-lx-rt</code></td>
+<td>面向 Xtensa LX CPU 的最小启动 / 运行时（<strong>C3 无关</strong>）</td>
+<td>Unstable</td>
+</tr>
+</tbody>
+</table>
+<p>* <code>esp-hal</code> 的各个外设驱动稳定性并不一致，查某个外设时请看
+该外设在文档里的稳定性标注，不要只看 crate 级别的 Stable。
+1.0 的稳定集只有 GPIO、UART、SPI master、I2C master。</p>
+<hr />
+<h2 id="15-c3">15. 示例索引（只列已核实文件名的，C3 相关）</h2>
+<p><strong>怎么判定一个示例能不能在 C3 上跑</strong>：不要只看文件名。
+每个示例文件头有 <code>//% CHIPS: esp32 esp32c2 esp32c3 …</code> 行，
+<code>examples/Cargo.toml</code> 里有按芯片分的 feature，<strong>C3 能不能编以它为准</strong>。
+构建命令（README 已核实）：<code>cargo xtask build examples esp-hal --chip esp32c3 all</code>；
+单跑：<code>cargo xtask run embassy_hello_world --chip=esp32c3</code>。
+官方示例默认按 DevKit-C 布线，<strong>引脚必须按你的 C3 板子重对</strong>。</p>
+<h3 id="esp-hal-examples"><code>esp-hal</code> 仓库 <code>examples/</code></h3>
+<table>
+<thead>
+<tr>
+<th>已核实示例</th>
+<th>演示内容</th>
+<th>C3 注意</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hello_world.rs</code></td>
+<td>最小阻塞程序：初始化 + 打印</td>
+<td>C3 可用，改 <code>--chip esp32c3</code> 即可</td>
+</tr>
+<tr>
+<td><code>embassy_hello_world.rs</code></td>
+<td>Embassy 异步入口 + <code>Timer::after</code> 闪灯</td>
+<td>C3 可用</td>
+</tr>
+<tr>
+<td><code>embassy_i2c.rs</code></td>
+<td>异步 I2C</td>
+<td>旧版 Cargo 要求 <code>async + embassy + embassy-executor-thread</code>；1.x 的 feature 名以当前 <code>examples/Cargo.toml</code> 为准</td>
+</tr>
+<tr>
+<td><code>embassy_spi.rs</code></td>
+<td>异步 SPI</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>embassy_serial.rs</code></td>
+<td>异步串口（UART echo，旧名）</td>
+<td><strong>1.x 是否改名未核实</strong>，用前先在 <code>examples/</code> 里确认文件名</td>
+</tr>
+<tr>
+<td><code>embassy_wait.rs</code></td>
+<td><code>embassy_time::Timer</code> 等待</td>
+<td>C3 可用</td>
+</tr>
+<tr>
+<td><code>examples/qa/</code> 下的 <code>sleep_timer</code> 等</td>
+<td>QA 用例</td>
+<td>非教程，按需参考</td>
+</tr>
+</tbody>
+</table>
+<p>另：<code>hil-test/tests/</code> 非示例，是硬件在环测试，可作 API 参考：
+<code>gpio.rs</code>、<code>uart.rs</code>、<code>uart_async.rs</code>、<code>spi_full_duplex.rs</code>、
+<code>spi_half_duplex_read.rs</code>、<code>spi_half_duplex_write.rs</code>、<code>i2s.rs</code>、<code>qspi.rs</code>。
+测试头有 <code>//% CHIPS: esp32 esp32c2 esp32c3 …</code> 与
+<code>//% FEATURES: unstable embassy</code>，C3 跑 UART/SPI/GPIO 测试需按头文件接线
+（如 C3-DevKit 上 GPIO2–GPIO3 短接）。</p>
+<p><strong>C3 不兼容 / 需改芯片 feature 的示例</strong>：凡用到 PSRAM、Ethernet、
+USB-OTG、摄像头、DAC、触摸、MCPWM、SDMMC、SPI3、第二核 /
+<code>start_second_core</code>、LP 外设的，一律不能在 C3 上原样跑。</p>
+<h3 id="esp-radio-exampleswifi"><code>esp-radio</code> 仓库 <code>examples/wifi/</code></h3>
+<table>
+<thead>
+<tr>
+<th>示例</th>
+<th>演示内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>embassy_dhcp</code></td>
+<td>STA 连 Wi-Fi + DHCP 取 IP（embassy-net）</td>
+</tr>
+<tr>
+<td><code>embassy_access_point</code></td>
+<td>开热点 AP</td>
+</tr>
+<tr>
+<td><code>embassy_access_point_with_sta</code></td>
+<td>AP + STA 共存</td>
+</tr>
+<tr>
+<td><code>embassy_coex</code></td>
+<td>Wi-Fi 与 BLE 共存</td>
+</tr>
+<tr>
+<td><code>embassy_sntp</code></td>
+<td>Wi-Fi + SNTP 对时</td>
+</tr>
+</tbody>
+</table>
+<p>另有 <code>qa-test/src/bin/</code> 下的 <code>embassy_wifi_bench</code>、<code>embassy_wifi_csi</code>、
+<code>embassy_wifi_stress</code>、<code>wifi_survives_ble_drop</code>（测试用，非教程）。
+ESP-NOW 官方例子的确切名字<strong>未核实</strong>，不要凭印象写。</p>
+<h3 id="ble-http">BLE / HTTP</h3>
+<table>
+<thead>
+<tr>
+<th>例子</th>
+<th>一句话</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rust on ESP Book <code>intro/http-client</code>（<code>http-client.rs</code>）</td>
+<td>STA + DHCP + <code>reqwless</code> HTTP GET（<code>TcpClient</code> + <code>DnsSocket</code>）</td>
+</tr>
+<tr>
+<td>implrust <code>wifi/embassy/connecting-wifi</code>、<code>wifi/embassy/http-request</code>、<code>wifi/web-server/wifi</code></td>
+<td>STA 连接 / HTTP 请求 / Web Server（<code>accept(80)</code> + 固定 HTML）</td>
+</tr>
+<tr>
+<td>implrust <code>bluetooth/trouble/ble-module</code></td>
+<td>trouble-host GATT Server：传感器读 / 通知 + 设置读 / 写两个特征</td>
+</tr>
+<tr>
+<td><code>trouble</code> 仓库 <code>examples/esp32</code></td>
+<td>ESP32 系列的 BLE GATT 示例目录（C3 是否逐个可用未核实）</td>
+</tr>
+<tr>
+<td>Derek Molloy《An Async Wi-Fi Web Server on the ESP32-C3 with Embassy and no_std Rust》（2026-06）</td>
+<td>C3 异步 Wi-Fi 的端到端对照：esp-hal ~1.1、esp-radio 0.18、esp-rtos 0.3、embassy-executor 0.10、embassy-net 0.9.1、embassy-time 0.5，SuperMini 板、GPIO8 低电平 LED</td>
+</tr>
+</tbody>
+</table>
+<h3 id="esp-nvs-esp-storage"><code>esp-nvs</code> / <code>esp-storage</code></h3>
+<p>在已打开的 docs.rs / docs.espressif 页面中<strong>未找到独立示例目录</strong>，
+只有 docs.rs 首页的 <code>Nvs::new</code> 代码片段（见第 7 章）；示例清单记为未核实。</p>
+<hr />
+<h2 id="16-c3">16. 新手最容易踩的坑（中文总结，C3 版）</h2>
+<ol>
+<li><strong>芯片 feature 不一致</strong>：<code>esp-hal</code> 是 <code>esp32c3</code>，<code>esp-println</code>
+   却是 <code>esp32c6</code>，编译报错信息往往不在点子上，先对齐所有芯片 feature。</li>
+<li><strong>漏了 panic 处理器</strong>：<code>no_std</code> 二进制没有默认 panic 处理器，
+   不引 <code>esp-backtrace</code>（或 <code>panic-probe</code>）根本编不过。</li>
+<li><strong>漏了 <code>esp_app_desc!()</code></strong>：能编译、能烧录、板子不启动，
+   先检查 <code>esp-bootloader-esp-idf::esp_app_desc!();</code> 有没有写。</li>
+<li><strong>堆初始化太晚</strong>：Wi-Fi、网络、显示库在用堆之前，
+   <code>heap_allocator!</code> 必须已经执行过，否则分配失败。</li>
+<li><strong>输出通道不一致</strong>：<code>esp-backtrace</code> 和 <code>esp-println</code> 一个走 UART、
+   一个走 USB-Serial-JTAG，panic 信息会发到你没看的那条线上。</li>
+<li><strong>按错芯片的文档</strong>：docs.rs 默认按一个芯片构建，
+   去 esp-rs 官网按你的芯片选文档，C3 和 C6 的外设清单不一样。</li>
+<li><strong>把 <code>esp-storage</code> 当文件系统</strong>：它只是 Flash 裸读写，
+   要文件或键值存储请在它上面再接 littlefs / <code>esp-nvs</code>。</li>
+<li><strong>照抄老教程的 <code>esp-wifi</code> / <code>esp-hal-embassy</code></strong>：1.x 里无线是
+   <code>esp-radio</code>、调度是 <code>esp-rtos</code>，老名字对应的是旧版本线，
+   混用会导致依赖解析失败或功能对不上。</li>
+<li><strong>在 C3 上用 PSRAM / DAC / 802.15.4 / 经典蓝牙</strong>：C3 没有这些，
+   <code>psram_allocator!</code>、DAC、Zigbee/Thread、经典蓝牙都不要写进 C3 工程。</li>
+<li><strong>异步任务里不 <code>.await</code> 的长计算</strong>：C3 单核、Embassy 协作式调度，
+    长计算不让出 CPU 会饿死 Wi-Fi / BLE，表现为断线 / 丢包 / 超时。</li>
+<li><strong>ADC2 + Wi-Fi 一起用</strong>：开 Wi-Fi 后 ADC2（GPIO5）读数不可靠，
+    做 Wi-Fi 传感器优先用 ADC1。</li>
+<li><strong>把 Flash 脚 / strapping 脚当普通 GPIO</strong>：GPIO11–GPIO17 接 Flash
+    永远别用；GPIO2 / GPIO8 / GPIO9 复位时别拉错电平。</li>
+<li><strong>照 C API 写 <code>esp-nvs</code></strong>：no_std <code>esp-nvs</code> 没有 <code>commit</code>、
+    没有 <code>get_i32</code> / <code>put_i32</code>，是泛型 <code>get::&lt;T&gt;</code> / <code>set</code>，写即落盘。</li>
+<li><strong>版本混用</strong>：<code>esp-radio</code> 0.17 和 0.18 的 Wi-Fi API 不一样，
+    <code>interfaces.sta</code> 和 <code>interfaces.station</code> 不要混用，成套升级。</li>
+</ol>
+<hr />
+<h2 id="17-esp32-c3-rust-no_std">17. 推荐的学习顺序（给 ESP32-C3 + Rust <code>no_std</code>）</h2>
+<ol>
+<li><code>esp-generate --chip esp32c3</code> 生成骨架，先跑通 Blink（先确认你板子的 LED 脚）；</li>
+<li>加 <code>esp-println</code>，把串口日志跑通，再看 panic 时的 backtrace；</li>
+<li>加 <code>esp-alloc</code>，试 <code>Vec</code> / <code>String</code>，理解堆大小和 <code>HEAP.stats()</code>；</li>
+<li>试一个 I2C / SPI 外设，理解外设单例和 <code>embedded-hal</code> trait；</li>
+<li>加 <code>esp-storage</code> / <code>esp-nvs</code>，做一个掉电不丢的配置（开机计数器）；</li>
+<li>上 Embassy：先跑 <code>embassy_hello_world</code>，理解 <code>Timer</code> / 任务 /
+   <code>Channel</code>，再试 GPIO <code>wait_for_*</code>；</li>
+<li>最后再上 <code>esp-radio</code> + <code>esp-rtos</code> + <code>embassy-net</code>，做 Wi-Fi 联网
+   （STA + DHCP + TCP），再试 BLE（trouble-host）。
+   无线是最重的一步，放在最后可以少走很多弯路。</li>
+</ol>
+<hr />
+<h2 id="_24">未核实清单（下次修订前补）</h2>
+<ol>
+<li>RMT / I2S / TWAI / RNG / AES / SHA / RSA / HMAC / TSens 的具体类型与方法名；
+   SPI 固有 <code>*_async</code> 方法名；ADC 是否有异步版；<code>embassy_serial.rs</code> 在 1.x 的现名；
+   官方 <code>examples/</code> 的完整文件名清单（需本地 clone 后以 <code>examples/Cargo.toml</code> 为准）；
+   GPIO 中断注册宏的确切名字。</li>
+<li><code>embassy-net</code> 最新版底层是 <code>smoltcp</code> 还是 <code>xarxa</code>（C3 官方例子用的是哪个版本）。</li>
+<li><code>controller.scan_async()</code>、<code>wait_for_disconnect_async()</code>、<code>sta_state()</code> /
+   <code>WifiStaState</code> 在 0.16 的存在性。</li>
+<li><code>trouble_host::new()</code> / <code>Host</code> / <code>Runner</code> 的确切构造签名；<code>DnsSocket</code>
+   除 <code>new(stack)</code> 外的方法；<code>TcpClient</code> / <code>TcpClientState</code> 的版本适用范围。</li>
+<li>no_std 下 espflash 默认是否刷分区表、以及 <code>partitions.csv</code> 的传入方式；
+   <code>esp-storage</code> 当前版是否仍需 <code>low-level</code> 才能配 <code>esp-nvs</code>；
+   <code>esp-backtrace</code> 最新版是否保留 <code>exception-handler</code>；
+   <code>embassy-executor</code> 与 <code>esp-rtos</code> 混用时 <code>arch-*</code> feature 的正确写法；
+   <code>embassy-net</code> / <code>embassy-futures</code> / <code>embedded-io</code> 等的确切最新版本号；
+   <code>esp-nvs</code> 的 <code>Get</code> / <code>Set</code> trait 是否需显式 <code>use</code> 才能调用 <code>get</code> / <code>set</code>。</li>
+</ol>
+<hr />
+<h2 id="_25">资料来源（原文链接）</h2>
+<ul>
+<li>《Rust on ESP Book》辅助 crate 总览：
+  https://docs.espressif.com/projects/rust/book/introduction/ancillary-crates.html</li>
+<li>《Rust on ESP Book》异步章节：
+  https://docs.espressif.com/projects/rust/book/application-development/async.html</li>
+<li>《Rust on ESP Book》堆分配章节：
+  https://docs.espressif.com/projects/rust/book/application-development/alloc.html</li>
+<li>《Rust on ESP Book》HTTP 客户端：
+  https://docs.espressif.com/projects/rust/no_std-training/03_6_http_client.html</li>
+<li><code>esp-hal</code> 官方文档（按芯片选）：
+  https://docs.esp-rs.org/esp-hal</li>
+<li><code>esp-hal</code> 1.0.0 C3 文档：
+  https://docs.espressif.com/projects/rust/esp-hal/1.0.0/esp32c3/esp_hal/index.html</li>
+<li><code>esp-hal</code> 支持矩阵：
+  https://docs.espressif.com/projects/rust/esp-hal/main/index.html</li>
+<li><code>esp-hal</code> 官方示例：
+  https://github.com/esp-rs/esp-hal/tree/main/examples</li>
+<li><code>esp-alloc</code> 文档：
+  https://docs.espressif.com/projects/rust/esp-alloc/0.9.0/esp_alloc/index.html</li>
+<li><code>esp-backtrace</code> 文档：
+  https://docs.rs/crate/esp-backtrace/latest</li>
+<li><code>esp-println</code> 文档：
+  https://docs.rs/crate/esp-println/latest</li>
+<li><code>esp-storage</code> 0.8 文档：
+  https://docs.espressif.com/projects/rust/esp-storage/0.8.0/esp_storage/struct.FlashStorage.html</li>
+<li><code>esp-nvs</code> 文档：
+  https://docs.rs/esp-nvs/latest/esp_nvs/</li>
+<li><code>esp-radio</code> 0.16 Wi-Fi 文档：
+  https://docs.espressif.com/projects/rust/esp-radio/0.16.0/esp32c3/esp_radio/wifi/struct.WifiController.html</li>
+<li><code>esp-radio</code> 1.0.0-beta.0 C3 预览：
+  https://preview-docs.espressif.com/projects/rust/esp-radio/1.0.0-beta.0/esp32c3/esp_radio/wifi/enum.Config.html</li>
+<li><code>esp-rtos</code> 0.2 / 0.3 文档：
+  https://docs.espressif.com/projects/rust/esp-rtos/0.2.0/esp32/esp_rtos/index.html</li>
+<li><code>embassy-net</code> Stack 文档：
+  https://docs.rs/embassy-net/latest/embassy_net/struct.Stack.html</li>
+<li><code>trouble-host</code> 文档：
+  https://docs.rs/trouble-host/0.3.0/trouble_host/prelude/index.html</li>
+<li>C3 数据手册：
+  https://documentation.espressif.com/esp32-c3_datasheet_en.html</li>
+<li>C3 异步 Wi-Fi 实例（2026-06）：
+  https://derekmolloy.ie/an-async-wi-fi-web-server-on-the-esp32-c3-with-embassy-and-no_std-rust-9/</li>
+<li>implrust ESP32 教程：
+  https://esp32.implrust.com/wifi/embassy/connecting-wifi.html</li>
+</ul>
+</body>
+</html>
